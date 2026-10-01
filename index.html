@@ -156,6 +156,11 @@
   .legendGrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 10px; margin-top:8px;}
   .legendGrid div{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text);}
   .legendGrid img{width:34px; height:44px;}
+
+  /* без голубой вспышки при касании (WebView Android/iOS) и без выделения/меню при долгом нажатии на поле */
+  *{-webkit-tap-highlight-color:transparent;}
+  #map, #map canvas, #battlefield, #battlefield canvas, #hud, #controls{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
+  button{-webkit-user-select:none; user-select:none;}
 </style>
 </head>
 <body>
@@ -246,7 +251,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.19.1', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.19.2', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
