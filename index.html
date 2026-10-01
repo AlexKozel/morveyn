@@ -246,7 +246,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.19.0', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.19.1', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -262,7 +262,7 @@ window.addEventListener('unhandledrejection',e=>{ recentErrors.push('promise: '+
 const API_BASE='https://morveyn-api.morveyn.workers.dev';
 const ANALYTICS_URL=API_BASE+'/events';
 // Ссылка на мини-приложение для вызовов «Побей мой результат»: https://t.me/<бот>/<короткое_имя>. Пусто — кнопка вызова скрыта.
-const BOT_APP_URL='';
+const BOT_APP_URL='https://t.me/morveyn_game_bot/PlayMorveyn';
 /* ================= ВОСПРОИЗВОДИМАЯ СЛУЧАЙНОСТЬ =================
    Вся случайность, влияющая на игру, идёт через R(). В обычной игре это Math.random. В испытании недели —
    поток из сида недели: отдельный на каждый день и на каждый бой (клетка боя + номер попытки на ней).
