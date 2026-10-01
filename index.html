@@ -245,7 +245,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.18.0', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.18.1', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -253,11 +253,12 @@ window.addEventListener('error',e=>{ recentErrors.push(`${e.message} @${(e.filen
 window.addEventListener('unhandledrejection',e=>{ recentErrors.push('promise: '+String(e.reason&&e.reason.message||e.reason)); if(recentErrors.length>5) recentErrors.shift(); });
 
 /* ================= СТАТИСТИКА ИГРОКОВ (аналитика) =================
-   Обезличенные события пачками уходят POST-запросом на ANALYTICS_URL (веб-приложение Google Apps Script пишет их
-   в Google-таблицу; код приёмника — в инструкции). Пусто = сбор выключен.
+   Обезличенные события пачками уходят на свой сервер (Cloudflare Worker + D1, проект morveyn-api).
+   Раз в 2 минуты, при 40 накопленных событиях и при сворачивании игры. В Telegram к пачке прикладывается initData:
+   сервер проверяет подпись и сам вычисляет код игрока. Пусто в ANALYTICS_URL = сбор выключен.
    Игрок = анонимный идентификатор: в Telegram — хеш SHA-256 от id аккаунта (одинаков на всех устройствах,
    но имя и id не передаются), вне Telegram — случайный, хранится на устройстве. */
-const ANALYTICS_URL='';
+const ANALYTICS_URL='https://morveyn-api.morveyn.workers.dev/events';
 const SESSION_ID=Math.random().toString(36).slice(2,10)+Date.now().toString(36);
 const SESSION_T0=Date.now();
 let analyticsQueue=[], playerId=null;
@@ -267,7 +268,7 @@ function analyticsCtx(){
 function track(e,d){
   if(!ANALYTICS_URL) return;
   analyticsQueue.push(Object.assign({t:Date.now(),e,d:d||{}},analyticsCtx()));
-  if(analyticsQueue.length>=15) flushAnalytics(false);
+  if(analyticsQueue.length>=40) flushAnalytics(false);
 }
 async function getPlayerId(){
   if(playerId) return playerId;
@@ -279,17 +280,28 @@ async function getPlayerId(){
   return playerId;
 }
 function analyticsPlatform(){ const tg=window.Telegram&&window.Telegram.WebApp; return tg&&tg.initData?('tg-'+(tg.platform||'?')):'web'; }
+let analyticsBusy=false;
 async function flushAnalytics(useBeacon){
-  if(!ANALYTICS_URL||!analyticsQueue.length) return;
-  const events=analyticsQueue.splice(0,analyticsQueue.length);
-  const body=JSON.stringify({pid:await getPlayerId(),sid:SESSION_ID,v:GAME_VERSION,platform:analyticsPlatform(),events});
-  try{
-    if(useBeacon&&navigator.sendBeacon){ navigator.sendBeacon(ANALYTICS_URL,new Blob([body],{type:'text/plain'})); return; }
-    // text/plain + no-cors: без предварительного CORS-запроса, работает с Google Apps Script
-    await fetch(ANALYTICS_URL,{method:'POST',mode:'no-cors',keepalive:true,headers:{'Content-Type':'text/plain'},body});
-  }catch(e){ analyticsQueue.unshift(...events.slice(-30)); }
+  if(!ANALYTICS_URL||!analyticsQueue.length||(analyticsBusy&&!useBeacon)) return;
+  const tg=window.Telegram&&window.Telegram.WebApp, initData=tg&&tg.initData?tg.initData:undefined;
+  const pid=await getPlayerId();
+  // сервер принимает до 60 событий за раз — шлём кусками по 50
+  while(analyticsQueue.length){
+    const events=analyticsQueue.splice(0,50);
+    const body=JSON.stringify({pid,sid:SESSION_ID,v:GAME_VERSION,platform:analyticsPlatform(),initData,events});
+    if(useBeacon&&navigator.sendBeacon){ navigator.sendBeacon(ANALYTICS_URL,new Blob([body],{type:'text/plain'})); continue; }
+    analyticsBusy=true;
+    try{
+      // text/plain — «простой» запрос без предварительной CORS-проверки
+      const r=await fetch(ANALYTICS_URL,{method:'POST',keepalive:true,headers:{'Content-Type':'text/plain'},body});
+      if(r.status>=500||r.status===429){ analyticsQueue.unshift(...events); break; } // сервер занят — повторим позже
+      // 4xx (чужой адрес, неверная подпись, битая пачка) — повтор не поможет, пачку не возвращаем
+    }catch(e){ analyticsQueue.unshift(...events.slice(-100)); break; } // нет сети — повторим в следующий раз
+    finally{ analyticsBusy=false; }
+  }
+  if(analyticsQueue.length>300) analyticsQueue.splice(0,analyticsQueue.length-300); // не копим бесконечно без сети
 }
-setInterval(()=>flushAnalytics(false),30000);
+setInterval(()=>flushAnalytics(false),120000);
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'){ track('session_pause',{sec:Math.round((Date.now()-SESSION_T0)/1000)}); flushAnalytics(true); } });
 window.addEventListener('error',e=>track('error',{msg:String(e.message).slice(0,200),line:e.lineno}));
 /* ================= UNITS (32, 5 factions) ================= */
