@@ -69,8 +69,9 @@
   #map .icon{font-size:calc(var(--tile)*0.62);}
   #map.gfx{display:block; padding:3px; line-height:0;}
   #map.gfx canvas{display:block; border-radius:6px; touch-action:manipulation; cursor:pointer;}
-  #battlefield{display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(6,1fr); gap:3px; box-sizing:border-box;
-    width:100%; max-width:560px; aspect-ratio:8/6; background:var(--panel2); padding:4px; border-radius:10px; border:2px solid var(--accent);}
+  #battlefield{display:block; box-sizing:content-box; width:100%; max-width:680px; background:var(--panel2); padding:0; border-radius:10px;
+    border:2px solid var(--accent); overflow:hidden; line-height:0;}
+  #battlefield canvas{display:block; touch-action:manipulation; cursor:pointer;}
   .tile,.cell{position:relative; display:flex; align-items:center; justify-content:center; cursor:default; overflow:hidden;}
   .cell{background:#3a2e1f; border-radius:4px;}
   .cell.alt{background:#443624;}
@@ -210,6 +211,8 @@
     <button id="saveBtn" class="secondary">💾 Сохранить игру</button>
     <button id="loadBtn" class="secondary">📂 Загрузить последнее сохранение</button>
     <button id="statsBtn" class="secondary">📊 Летопись похода</button>
+    <button id="questLogBtn" class="secondary">📜 Поручения</button>
+    <button id="pathBtn" class="secondary">🧩 Карта пути</button>
     <button id="journalBtn" class="secondary">📖 Справочник городов</button>
     <button id="legendBtn" class="secondary">🗺️ Легенда карты</button>
     <button id="gfxBtn" class="secondary">🎨 Графика: новая</button>
@@ -223,7 +226,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.13.0', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.16.0', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -540,6 +543,16 @@ function makeCaveEntry(k,rng){
 }
 
 let hero, CITY1, pois, worldSeed=Date.now();
+/* Туман войны: разведанные клетки текущей земли (1 — открыта). null — тумана нет (старые сохранения). */
+let fog=null;
+function isExplored(r,c){ return !fog||(r>=0&&r<ROWS&&c>=0&&c<COLS&&fog[r*COLS+c]===1); }
+function revealOn(f,r,c,rad){ for(let dr=-rad;dr<=rad;dr++) for(let dc=-rad;dc<=rad;dc++){ if(dr*dr+dc*dc>rad*rad+rad) continue; const rr=r+dr, cc=c+dc; if(rr>=0&&rr<ROWS&&cc>=0&&cc<COLS) f[rr*COLS+cc]=1; } }
+function visionRadius(){ return 4+(heroClass==='ranger'?1:0)+(onShip?1:0); }
+function revealAround(r,c,rad){ if(fog) revealOn(fog,r,c,rad===undefined?visionRadius():rad); }
+function fogEncode(f){ if(!f) return null; let out='',prev=null,n=0; const flush=()=>{ if(prev!==null) out+=(n>1?n:'')+(prev?'a':'b'); };
+  for(let i=0;i<f.length;i++){ const v=f[i]; if(v===prev) n++; else { flush(); prev=v; n=1; } } flush(); return out; }
+function fogDecode(str){ const f=new Uint8Array(ROWS*COLS); if(!str){ f.fill(1); return f; } let num='',i=0;
+  for(const ch of str){ if(ch>='0'&&ch<='9') num+=ch; else { const n=num?parseInt(num,10):1; const v=ch==='a'?1:0; for(let k=0;k<n&&i<f.length;k++) f[i++]=v; num=''; } } return f; }
 function terrainParams(rng,cfg){
   const ph=[], f=[];
   for(let i=0;i<6;i++){ ph.push(rng()*Math.PI*2); f.push(0.85+rng()*0.3); }
@@ -592,7 +605,7 @@ function generateWorld(ci){
     const faction=cfg.cityFactions[i%cfg.cityFactions.length];
     const lo=Math.min(5,1+T), pool1=unitsByFaction(faction,lo), pool2=unitsByFaction(faction,lo+1);
     const picks=pickN([...new Set([...pool1,...pool2])],2,rng);
-    newPois.push({r:p.r,c:p.c,type:'city',name:cfg.cities[i],emoji:i===0?'🏰':'🏘️',tax:Math.round((8+Math.floor(rng()*8))*goldMult(ci)),
+    newPois.push({r:p.r,c:p.c,type:'city',name:cfg.cities[i],emoji:i===0?'🏰':'🏘️',tax:Math.round((10+Math.floor(rng()*8))*goldMult(ci)),
       recruit:picks.map(k=>makeRecruitEntry(k))});
   });
 
@@ -606,27 +619,29 @@ function generateWorld(ci){
     const diff=difficultyOf(p);
     const tier=Math.min(6,Math.min(5,1+T)+Math.round(diff*3)+(isLord?1:0));
     const faction=cfg.castleFactions[Math.floor(rng()*cfg.castleFactions.length)];
-    let keys;
-    if(isLord){
-      const elitePool=Object.entries(UNITS).filter(([k,u])=>u.tier>=5).map(([k])=>k);
-      keys=pickN(elitePool,3,rng);
-    } else {
-      keys=pickN([...new Set([...unitsByFaction(faction,tier),...unitsByFaction(faction,Math.max(1,tier-1))])],2,rng);
-    }
+    /* Гарнизон: 3–4 отряда (дальние замки — 4), у Хозяина Земли 5. Состав — фракция замка на уровнях tier−1…tier+1;
+       если фракции не хватает видов, добираем из других фракций того же уровня. */
+    const nStacks=isLord?5:(3+(diff>0.45?1:0));
+    let pool;
+    if(isLord){ pool=[...new Set([...Object.entries(UNITS).filter(([k,u])=>u.tier>=5).map(([k])=>k),...unitsByFaction(faction,tier)])]; }
+    else pool=[...new Set([...unitsByFaction(faction,tier),...unitsByFaction(faction,Math.max(1,tier-1)),...unitsByFaction(faction,Math.min(6,tier+1))])];
+    let keys=pickN(pool,nStacks,rng);
+    if(keys.length<nStacks){ const extra=Object.entries(UNITS).filter(([k,u])=>Math.abs(u.tier-tier)<=1&&!keys.includes(k)).map(([k])=>k); keys=keys.concat(pickN(extra,nStacks-keys.length,rng)); }
     if(keys.length===0) keys.push('goblins');
-    const garrison=keys.map((k,gi)=>({key:k,count:Math.max(2,Math.round((isLord?36:24)*foeMult(ci)/(UNITS[k].tier+gi)))}));
+    const base=isLord?46:32;
+    const garrison=keys.map(k=>({key:k,count:Math.max(3,Math.round(base*foeMult(ci)*(0.8+rng()*0.45)/UNITS[k].tier))}));
     const wallBase=Math.round((80+tier*35)*(1+0.3*T));
     const recruit=pickN([...new Set([...unitsByFaction(faction,Math.max(1,tier-1)),...unitsByFaction(faction,tier)])],2,rng).map(k=>makeRecruitEntry(k));
     if(isLord){
       newPois.push({
-        r:p.r,c:p.c,type:'governor',name:'Хозяин Земли',emoji:'👑',owner:'enemy',
+        r:p.r,c:p.c,type:'governor',name:'Хозяин Земли',emoji:'👑',owner:'enemy',tax:Math.round(30*goldMult(ci)),
         lord:cfg.master,
         wallHp:Math.round(wallBase*1.6),wallMax:Math.round(wallBase*1.6),
         garrison,recruit,rewardClaimed:false,contractsRequired:7,
       });
     } else {
       newPois.push({
-        r:p.r,c:p.c,type:'castle',name:`Замок №${i+1}`,emoji:'🏯',owner:'enemy',
+        r:p.r,c:p.c,type:'castle',name:`Замок №${i+1}`,emoji:'🏯',owner:'enemy',tax:Math.round((12+Math.floor(rng()*9))*goldMult(ci)),
         lord:cfg.lords[i%cfg.lords.length],
         wallHp:wallBase,wallMax:wallBase,garrison,recruit,
       });
@@ -693,16 +708,18 @@ function generateWorld(ci){
   // waystones
   for(let i=0;i<8;i++){ const p=place(wide,3); if(p){ const gold=rng()<0.5; newPois.push({r:p.r,c:p.c,type:'waystone',name:'Придорожный камень',emoji:'🪨',reward:gold?{type:'gold',value:Math.round((10+Math.floor(rng()*16))*goldMult(ci))}:{type:'exp',value:Math.round((5+Math.floor(rng()*11))*goldMult(ci))}}); } }
   // wild lairs
-  const lairFactions=['beast','monster','undead','beast','monster'];
-  for(let i=0;i<5;i++){
+  /* 14 логовищ: половина бродячих, ~35% — смешанные отряды из двух видов. */
+  const lairFactions=['beast','monster','undead','beast','monster','human','nature'];
+  for(let i=0;i<14;i++){
     const p=place(wide,3);
     if(p){
       const diff=difficultyOf(p); const tier=Math.max(1,Math.min(6,1+T+Math.round(diff*3)));
       const faction=lairFactions[i%lairFactions.length];
-      const keys=pickN(unitsByFaction(faction,tier),1,rng);
-      const key=keys[0]||'goblins';
+      const key=pickN(unitsByFaction(faction,tier),1,rng)[0]||pickN(unitsByFaction('beast',tier),1,rng)[0]||'goblins';
       const roaming=i%2===0;
-      newPois.push({r:p.r,c:p.c,type:'lair',name:'Логово '+UNITS[key].name.toLowerCase(),emoji:UNITS[key].emoji,enemies:[{key,count:Math.round((6+Math.floor(rng()*8))*foeMult(ci))}],roaming,aggroRadius:roaming?5:0});
+      const enemies=[{key,count:Math.round((6+Math.floor(rng()*8))*foeMult(ci))}];
+      if(rng()<0.35){ const k2=pickN(unitsByFaction(faction,Math.max(1,tier-1)).filter(k=>k!==key),1,rng)[0]; if(k2) enemies.push({key:k2,count:Math.round((4+Math.floor(rng()*6))*foeMult(ci))}); }
+      newPois.push({r:p.r,c:p.c,type:'lair',name:(roaming?'Отряд: ':'Логово: ')+UNITS[key].name.toLowerCase(),emoji:UNITS[key].emoji,enemies,roaming,aggroRadius:roaming?5:0});
     }
   }
   // the Black Sorcerer: relentlessly pursues the hero, no radius limit
@@ -718,7 +735,8 @@ function generateWorld(ci){
   pois.forEach(p=>{ if(['city','castle','port','cave','camp'].includes(p.type)) terrainGrid[p.r][p.c]='g'; });
   ensurePoiAccess(home,pois);
   assignShops(pois,T,rng);
-  return {terrainGrid,pois,sorcerer,CITY1,visited:{},mapPieces:0,landComplete:false,questState:'available',
+  const wf=new Uint8Array(ROWS*COLS); revealOn(wf,home.r,home.c,6); if(arrivalPort) revealOn(wf,arrivalPort.r,arrivalPort.c,5);
+  return {terrainGrid,pois,sorcerer,CITY1,visited:{},mapPieces:0,landComplete:false,questState:'available',fog:wf,
     arrival:arrivalPort?{r:arrivalPort.r,c:arrivalPort.c}:{r:home.r,c:home.c}};
 }
 /* ---------- Доступность объектов ----------
@@ -828,13 +846,13 @@ function cityTitle(sh){
 /* Переключение текущей земли: сохраняем примитивы текущего мира, подгружаем целевой (генерация — лениво, при первом визите). */
 function stashWorld(){
   const w=worlds[curCont]; if(!w) return;
-  Object.assign(w,{terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState});
+  Object.assign(w,{terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState,fog});
 }
 function loadWorld(i){
   stashWorld();
   if(!worlds[i]) worlds[i]=generateWorld(i);
   const w=worlds[i]; curCont=i;
-  ({terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState}=w);
+  ({terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState}=w); fog=w.fog||null;
   return w;
 }
 function allPois(){ stashWorld(); return worlds.filter(Boolean).flatMap(w=>w.pois); }
@@ -870,7 +888,7 @@ const HERO_CLASSES={
     desc:'Маг. +5 к магической силе — заклинания дешевле и доступнее раньше; с собой Исцеление и Огненный шар. С каждым уровнем — ещё +1 маг. сила.',
     start(){ heroMagicPower+=5; spellCharges.heal=(spellCharges.heal||0)+1; spellCharges.fireball=(spellCharges.fireball||0)+1; }},
   ranger:{name:'Ярен',title:'следопыт',emoji:'🧝',bonus:{movesPerDay:2,goldPerWeek:15},lvlLead:0,lvlMagic:0,
-    desc:'Путешественник. +2 хода в день и +15💰 в неделю; с собой лишние Лесоруб и Камнетёс.',
+    desc:'Путешественник. +2 хода в день, +1 к дальности обзора и +15💰 в неделю; с собой лишние Лесоруб и Камнетёс.',
     start(){ workers.lumberjack+=1; workers.stonemason+=1; }},
   classic:{name:'Герой',title:'странник',emoji:'🧝',bonus:{},lvlLead:0,lvlMagic:0,desc:''},
 };
@@ -1026,6 +1044,7 @@ function battleCasualties(){
 }
 function tileClick(r,c){
   if(view!=='map') return;
+  if(!isExplored(r,c)){ setInfo('🌫️ Эта местность ещё не разведана — подойдите ближе.'); return; }
   const dist=dijkstra(), k=key(r,c);
   if(dist[k]===undefined){
     if(adjacent(r,c)){
@@ -1040,7 +1059,7 @@ function tileClick(r,c){
   if(walkAnim) return;
   if(onShip && tch(hero.row,hero.col)==='w') lastWaterPos={r:hero.row,c:hero.col};
   const path=heroPath(dist,r,c);
-  path.slice(1).forEach(q=>{ if(tch(q.r,q.c)==='w') stats.tilesSailed++; else stats.tilesWalked++; });
+  path.slice(1).forEach(q=>{ if(tch(q.r,q.c)==='w') stats.tilesSailed++; else stats.tilesWalked++; revealAround(q.r,q.c); });
   movesLeft-=dist[k]; hero.row=r; hero.col=c;
   if(onShip && tch(r,c)!=='w'){
     // корабль остаётся у берега — на последней водной клетке пути
@@ -1124,25 +1143,11 @@ function triggerPoi(p){
   if(p.type==='city'){ openCity(p); }
   else if(p.type==='castle'){
     if(p.owner==='player'){ openCity(p); }
-    else {
-      const gsum=p.garrison.map(e=>`${UNITS[e.key].emoji}×${e.count}`).join(' ');
-      const wallLine=p.wallHp>0?`🧱 Стены: ${p.wallHp}/${p.wallMax} (защитники +3 к защите)`:`🧱 Стены разрушены.`;
-      setInfo(`🏴 <b>${p.name}</b> — правит <b>${p.lord}</b>. Гарнизон: ${gsum}<br>${wallLine}<br>
-        ${p.wallHp>0?`<button onclick="bombardWalls(${p.r},${p.c})">Обстрелять стены (-2 хода)</button>`:''}
-        <button onclick="attackCity(${p.r},${p.c})">Штурмовать</button>
-        <button class="secondary" onclick="setInfo('Вы отступили.')">Отступить</button>`);
-    }
+    else showSiege(p);
   }
   else if(p.type==='governor'){
     if(p.owner==='player'){ openCity(p); }
-    else if(p.rewardClaimed){
-      const gsum=p.garrison.map(e=>`${UNITS[e.key].emoji}×${e.count}`).join(' ');
-      const wallLine=p.wallHp>0?`🧱 Стены: ${p.wallHp}/${p.wallMax} (+3 к защите)`:`🧱 Стены разрушены.`;
-      setInfo(`👑 <b>${p.name}</b> теперь враждебен после получения награды! Гарнизон: ${gsum}<br>${wallLine}<br>
-        ${p.wallHp>0?`<button onclick="bombardWalls(${p.r},${p.c})">Обстрелять стены (-2 хода)</button>`:''}
-        <button onclick="attackGovernor(${p.r},${p.c})">Штурмовать</button>
-        <button class="secondary" onclick="setInfo('Вы отступили.')">Отступить</button>`);
-    } else {
+    else if(p.rewardClaimed){ showSiege(p); } else {
       const done=capturedCount(), req=p.contractsRequired;
       if(done>=req){
         setInfo(`👑 <b>${p.name}</b>: «Контракты на всех удельных князей выполнены! Выберите награду»:<br>
@@ -1162,6 +1167,12 @@ function triggerPoi(p){
   else if(p.type==='altar'){ handleAltarQuest(p); }
   else if(p.type==='cave'){ openCity(p); }
   else if(p.type==='camp'){ openCity(p); }
+  else if(p.type==='qspot'&&p.hidden){ setInfo(`Ходов осталось: ${movesLeft}.`); }
+  else if(p.type==='qspot'){
+    const q=activeQuests().find(q=>q.type==='treasure'&&q.cont===curCont&&q.tr===p.r&&q.tc===p.c);
+    pois=pois.filter(x=>x!==p); if(worlds[curCont]) worlds[curCont].pois=pois;
+    setInfo(q?completeQuest(q,'тайник найден'):'Тайник пуст.'); renderMap();
+  }
   else if(p.type==='port'){
     const dests=CONTINENTS.map((c,i)=>i).filter(i=>i!==curCont&&unlocked[i]);
     if(hasShip && dests.length){
@@ -1189,14 +1200,23 @@ function power(items,isArmy){
     return s+cnt*(u.hp+u.dmg[1]);
   },0);
 }
-function startEncounter(lair){
-  const enemyPow=power(lair.enemies,false), armyPow=power(army,true);
-  if(armyPow>enemyPow*1.6 && Math.random()<0.5){
-    const cost=Math.max(50,Math.round(enemyPow*2.5));
-    setInfo(`${lair.emoji} <b>${lair.name}</b> предлагает присоединиться за <b>${cost}</b> золота, вместо боя.<br>
-      <button onclick="joinAccept(${lair.r},${lair.c},${cost})">Нанять</button>
-      <button class="secondary" onclick="joinDecline(${lair.r},${lair.c})">Атаковать</button>`);
-  } else { curEncounter={type:'lair',ref:lair}; beginBattle(lair); }
+/* Отряд готов присоединиться, если ваша армия заметно сильнее — такие не нападают и не преследуют. */
+function lairWilling(lair){ return power(army,true)>power(lair.enemies,false)*1.6; }
+function startEncounter(lair,caught){
+  const enemyPow=power(lair.enemies,false), armyPow=power(army,true), ratio=enemyPow/Math.max(1,armyPow);
+  const comp=lair.enemies.map(e=>`${UNITS[e.key].emoji} ${UNITS[e.key].name}×${e.count}`).join(', ');
+  const verdict=ratio<0.6?'<span style="color:var(--good)">заметно слабее вас</span>':ratio<1.1?'<span style="color:var(--accent)">примерно равны вам</span>':'<span style="color:var(--bad)">сильнее вас</span>';
+  const willing=lairWilling(lair), cost=Math.max(50,Math.round(enemyPow*2.5));
+  setInfo(`${lair.emoji} <b>${lair.name}</b>${caught?' настигает вас!':''}<br>${comp} — ${verdict}.<br>
+    <button onclick="joinDecline(${lair.r},${lair.c})">⚔️ Атаковать</button>
+    ${willing?`<button onclick="joinAccept(${lair.r},${lair.c},${cost})">💰 Нанять за ${cost}</button>`:''}
+    <button class="secondary" onclick="lairLeave(${lair.r},${lair.c})">🚶 Уйти</button>`);
+}
+function lairLeave(r,c){
+  const lair=pois.find(p=>p.r===r&&p.c===c&&p.type==='lair');
+  if(lair) lair.calmUntil=day+1; // до конца завтрашнего дня не преследует
+  setInfo(`Вы обошли «${lair?lair.name:'отряд'}» стороной. До конца завтрашнего дня он вас не тронет.`);
+  renderMap();
 }
 function joinAccept(r,c,cost){
   const lair=pois.find(p=>p.r===r&&p.c===c);
@@ -1211,20 +1231,30 @@ function joinAccept(r,c,cost){
   });
   visited[key(lair.r,lair.c)+':lair']=true;
   if(noRoom) setTimeout(()=>setInfo('⚠️ Часть отрядов не поместилась — все 10 слотов армии заняты.'),1400);
-  setInfo(`${lair.name} присоединились к вашей армии!`);
+  const qmsg=questOnLairCleared(lair);
+  setInfo(`${lair.name} присоединились к вашей армии!${qmsg?'<br>'+qmsg:''}`);
   renderMap();
 }
 function joinDecline(r,c){ const lair=pois.find(p=>p.r===r&&p.c===c); curEncounter={type:'lair',ref:lair}; beginBattle(lair); }
+/* Панель осады: остаётся на экране после обстрела — результат выстрела сверху, кнопки на месте. */
+function showSiege(p,msg){
+  const gsum=p.garrison.map(e=>`${UNITS[e.key].emoji}×${e.count}`).join(' ');
+  const wallLine=p.wallHp>0?`🧱 Стены: ${p.wallHp}/${p.wallMax} (защитники +3 к защите)`:`🧱 Стены разрушены — защитники без бонуса.`;
+  const head=p.type==='governor'?`👑 <b>${p.name}</b> теперь враждебен после получения награды!`:`🏴 <b>${p.name}</b> — правит <b>${p.lord}</b>.`;
+  const atk=p.type==='governor'?`attackGovernor(${p.r},${p.c})`:`attackCity(${p.r},${p.c})`;
+  setInfo(`${msg?msg+'<br>':''}${head} Гарнизон: ${gsum}<br>${wallLine}<br>
+    ${p.wallHp>0?`<button onclick="bombardWalls(${p.r},${p.c})" ${movesLeft<2?'disabled':''}>Обстрелять стены (-2 хода, осталось ${movesLeft})</button>`:''}
+    <button onclick="${atk}">Штурмовать</button>
+    <button class="secondary" onclick="setInfo('Вы отошли от стен.')">Отступить</button>`);
+}
 function bombardWalls(r,c){
   const city=pois.find(p=>p.r===r&&p.c===c);
-  if(movesLeft<2){ setInfo('Недостаточно ходов (нужно 2).'); return; }
+  if(movesLeft<2){ showSiege(city,'⏳ Недостаточно ходов для обстрела (нужно 2) — продолжите завтра или штурмуйте.'); return; }
   movesLeft-=2;
   const dmg=randInt(20,40);
   city.wallHp=Math.max(0,city.wallHp-dmg);
-  updateHud();
-  if(city.wallHp<=0) setInfo(`💥 Стены «${city.name}» пробиты!`);
-  else setInfo(`💥 Обстрел: -${dmg} прочности (осталось ${city.wallHp}/${city.wallMax}). Ходов: ${movesLeft}.`);
-  renderMap();
+  updateHud(); renderMap();
+  showSiege(city,city.wallHp<=0?`💥 Стены «${city.name}» пробиты!`:`💥 Обстрел: -${dmg} прочности.`);
 }
 function attackCity(r,c){
   const city=pois.find(p=>p.r===r&&p.c===c);
@@ -1267,6 +1297,7 @@ function claimGovernorReward(r,c,choice){
     mapPieces=Math.min(TOTAL_PIECES-1,mapPieces+1);
     SPELLS.forEach(s=>spellCharges[s.key]=(spellCharges[s.key]||0)+2);
     setInfo('👑 Получена часть древней карты и +2 заряда ко всем заклинаниям! Отныне Хозяин Земли враждебен.');
+    setTimeout(()=>openPieces(true),200);
   }
   else if(choice==='title'){
     bonusLeadership+=100;
@@ -1299,6 +1330,7 @@ function sailTo(i){
   hero={row:w.arrival.r,col:w.arrival.c};
   onShip=false; lastWaterPos=null;
   shipPos=findAdjacentWater(w.arrival.r,w.arrival.c)||{r:w.arrival.r,c:w.arrival.c};
+  revealAround(hero.row,hero.col,5);
   movesLeft=0; stats.voyages++;
   saveSoon(true);
   setInfo(`⛵ Долгое плавание из ${from} окончено: вы сошли на берег земли ${contCfg().emoji} <b>${contCfg().name}</b>. Корабль ждёт у пристани. Ходы на сегодня исчерпаны.`);
@@ -1406,7 +1438,9 @@ function openWaystone(p){
 /* Мобы ходят только по проходимой земле (равнина, дорога/мост, болото, пустыня).
    Лес, горы и вода для них — стена, как и для героя без работников. */
 const MOB_PASSABLE=new Set(['g','d','s','r']);
-function mobCanStand(r,c){ return r>=0&&r<ROWS&&c>=0&&c<COLS&&MOB_PASSABLE.has(terrainGrid[r][c]); }
+// мобы не встают на города, замки и прочие объекты (кроме клетки самого героя — там начинается бой)
+let mobBlocked=new Set();
+function mobCanStand(r,c){ return r>=0&&r<ROWS&&c>=0&&c<COLS&&MOB_PASSABLE.has(terrainGrid[r][c])&&!mobBlocked.has(r*COLS+c); }
 const DIRS8=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
 // диагональ разрешена, только если обе соседние прямые клетки проходимы (нельзя «срезать угол» скалы)
 function mobCanStep(r,c,dr,dc){
@@ -1416,6 +1450,7 @@ function mobCanStep(r,c,dr,dc){
 }
 /* Поле расстояний от героя (BFS по 8 направлениям). Мобы спускаются по нему — обходят препятствия, а не лезут напрямик. */
 function mobDistanceField(){
+  mobBlocked=new Set(pois.filter(q=>poiAt(q.r,q.c)===q).map(q=>q.r*COLS+q.c));
   const field=new Int16Array(ROWS*COLS).fill(-1);
   const q=[hero.row*COLS+hero.col]; field[q[0]]=0;
   for(let i=0;i<q.length;i++){
@@ -1438,7 +1473,9 @@ function mobStep(entity,field){
     if(d>=0&&d<bestD){ bestD=d; best=[dr,dc]; }
   }
   if(!best) return false;
-  entity.r+=best[0]; entity.c+=best[1];
+  const nr=entity.r+best[0], nc=entity.c+best[1];
+  if(!(nr===hero.row&&nc===hero.col)) mobBlocked.add(nr*COLS+nc); mobBlocked.delete(entity.r*COLS+entity.c);
+  entity.r=nr; entity.c=nc;
   return true;
 }
 function processRoamers(){
@@ -1447,9 +1484,11 @@ function processRoamers(){
     const d=Math.max(Math.abs(hero.row-p.r),Math.abs(hero.col-p.c));
     const pathD=field[p.r*COLS+p.c];
     // замечает героя в радиусе и только если к нему есть недлинный путь по земле
+    // не преследуют: успокоенные (герой ушёл) и те, кто сам хочет к вам в армию
+    if((p.calmUntil||0)>=day || lairWilling(p)) return;
     if(d<=p.aggroRadius && d>0 && pathD>0 && pathD<=p.aggroRadius+3){
       mobStep(p,field);
-      if(p.r===hero.row&&p.c===hero.col){ startEncounter(p); }
+      if(p.r===hero.row&&p.c===hero.col){ startEncounter(p,true); }
     }
   });
   if(sorcerer && sorcerer.active && view==='map'){
@@ -1529,7 +1568,12 @@ function doTownGate(r,c){
 }
 
 /* ================= CITY / CASTLE HUB ================= */
-function openCity(p){ curCity=p; if(p.type==='city'){ p.seen=true; showTip('city'); } showView('city'); renderCity(); }
+function openCity(p){
+  curCity=p; let msg='';
+  if(p.type==='city'){ p.seen=true; showTip('city');
+    const q=activeQuests().find(q=>q.type==='courier'&&q.cont===curCont&&q.dest===p.name); if(q) msg=completeQuest(q,'письмо вручено'); }
+  showView('city'); renderCity(msg);
+}
 function sellPrice(key){ return Math.max(1, Math.round(UNITS[key].upkeep*4)); }
 function recruitUnit(pr,pc,k,qty){
   pr=Number(pr); pc=Number(pc);
@@ -1584,6 +1628,7 @@ function renderCity(msg){
   const sh=p.shop||{spells:[],items:[],workers:[]};
   let html=`<div class="cityCard"><h2>${p.emoji} ${p.name}</h2>${p.shop?`<div class="armyline" style="color:var(--accent);">${p.shop.title}</div>`:''}<div class="armyline">Ваша армия: ${armyLine}</div>
     ${msg?`<div class="armyline" style="color:var(--good);margin-top:6px;">${msg}</div>`:''}</div>`;
+  html+=cityQuestHtml(p);
   const minimal=p.isCave||p.isCamp;
   html+=`<div class="cityCard"><h2>${p.isCave?'Найм (эксклюзивные существа)':p.isCamp?'Случайный отряд наёмников':'Найм войск'}</h2>`;
   if(p.isCave) html+=`<div class="armyline" style="margin-bottom:6px;">🕳️ Запас пещеры общий на всю игру и не пополняется. Цены выше городских.</div>`;
@@ -1721,16 +1766,17 @@ function switchZone(armyId){
 let stacks=[],order=[],idx=0,battleOver=false,logLines=[];
 function bUnit(s){ return UNITS[s.key]; }
 function bCount(s){ return Math.max(1,Math.ceil(s.hp/bUnit(s).hp)); }
-function bOccupied(r,c){ return stacks.some(s=>s.hp>0&&s.row===r&&s.col===c); }
+function bOccupied(r,c){ return isObst(r,c)||stacks.some(s=>s.hp>0&&s.row===r&&s.col===c); }
 function bLog(t){ logLines.push(t); if(logLines.length>60) logLines.shift(); }
 function syncArmyFromBattle(){ stacks.filter(s=>s.side==='player').forEach(s=>{ const a=army.find(x=>x.id===s.armyId); if(a) a.hp=s.hp; }); }
 function beginBattle(enc){
   logLines=[]; battleOver=false; showTip('battle');
   lastBattleEnemyPower=power(enc.enemies,false);
-  const prows=[0,2,3,5];
-  stacks=activeStacks().map((a,i)=>({id:'p'+a.id,side:'player',key:a.key,hp:a.hp,startHp:a.hp,maxHp:a.max,row:prows[i]||i,col:0,armyId:a.id}));
-  const erows=[0,2,3,5];
-  enc.enemies.forEach((e,i)=>{ const hp=e.count*UNITS[e.key].hp; stacks.push({id:'e'+i,side:'enemy',key:e.key,hp:hp,maxHp:hp,row:erows[i]||i,col:7}); });
+  const mine=activeStacks(), prows=bSlotRows(mine.length);
+  stacks=mine.map((a,i)=>({id:'p'+a.id,side:'player',key:a.key,hp:a.hp,startHp:a.hp,maxHp:a.max,row:prows[i],col:0,armyId:a.id}));
+  const erows=bSlotRows(enc.enemies.length);
+  enc.enemies.forEach((e,i)=>{ const hp=e.count*UNITS[e.key].hp; stacks.push({id:'e'+i,side:'enemy',key:e.key,hp:hp,maxHp:hp,row:erows[i],col:BF_COLS-1}); });
+  bfx=[]; bVis={}; bObst=[]; bScene=makeBattleScene(enc); bObst=genObstacles(bScene);
   bLog(`⚔️ Бой у «${enc.name}» начался!`);
   order=stacks.slice().sort((a,b)=>bUnit(b).speed-bUnit(a).speed); idx=0;
   showView('battle');
@@ -1770,7 +1816,8 @@ function onVictory(){
     const reward=Math.round((30+Math.random()*90)*goldMult()); gold+=reward; updateHud();
     visited[key(lair.r,lair.c)+':lair']=true;
     bLog(`Добыча: +${reward} золота.`);
-    setTimeout(()=>{ showView('map'); renderMap(); setInfo(`🏆 Победа у «${lair.name}»! +${reward} золота.`); },1300);
+    const qmsg=questOnLairCleared(lair);
+    setTimeout(()=>{ showView('map'); renderMap(); setInfo(`🏆 Победа у «${lair.name}»! +${reward} золота.${qmsg?'<br>'+qmsg:''}`); },1300);
   } else if(curEncounter.type==='pyramid'){
     const pyr=curEncounter.ref;
     visited[key(pyr.r,pyr.c)+':pyramid']=true;
@@ -1812,14 +1859,14 @@ function onVictory(){
     const reward=Math.round((20+Math.random()*40)*goldMult()); gold+=reward; updateHud();
     bLog(`🏴 ${city.lord} повержен(а)! «${city.name}» захвачен (${mapPieces}/${TOTAL_PIECES}).`);
     checkLandComplete();
-    setTimeout(()=>{ openCity(city); renderCity(`Замок захвачен! +${reward}💰.`); },1300);
+    setTimeout(()=>{ openCity(city); renderCity(`Замок захвачен! +${reward}💰.`); setTimeout(()=>openPieces(true),250); },1300);
   } else if(curEncounter.type==='governor_war'){
     const gov=curEncounter.ref;
     gov.owner='player'; mapPieces=TOTAL_PIECES;
     const reward=Math.round((50+Math.random()*60)*goldMult()); gold+=reward; updateHud();
     bLog(`👑 Хозяин Земли повержен! Последняя часть карты собрана (${mapPieces}/${TOTAL_PIECES})!`);
     checkLandComplete();
-    setTimeout(()=>{ openCity(gov); renderCity(`Хозяин Земли повержен! +${reward}💰. Земля покорена полностью.`); },1300);
+    setTimeout(()=>{ openCity(gov); renderCity(`Хозяин Земли повержен! +${reward}💰. Земля покорена полностью.`); setTimeout(()=>openPieces(true),250); },1300);
   }
 }
 function onDefeat(){
@@ -1838,6 +1885,8 @@ function doAttack(att,def){
   const defVal=du.def + (def.side==='player'?equipBonus('def'):0) + (def.side==='enemy'?currentWallBonus:0);
   let dmg=Math.round(cnt*roll*(1-Math.min(0.7,defVal*0.05))); dmg=Math.max(cnt,dmg);
   def.hp-=dmg;
+  const isShot=au.ranged&&dist(att,def)>1;
+  fxAttack(att,def,dmg,isShot,0);
   bLog(`${au.emoji} «${au.name}» бьёт: -${dmg} «${du.name}»`);
   if(def.hp<=0){ def.hp=0; bLog(`☠️ «${du.name}» уничтожены!`); }
   else if(!au.ranged){
@@ -1845,6 +1894,7 @@ function doAttack(att,def){
     const atkDefVal=au.def + (att.side==='player'?equipBonus('def'):0);
     let rdmg=Math.round(dCnt*rroll*(1-Math.min(0.7,atkDefVal*0.05))*0.7); rdmg=Math.max(1,rdmg);
     att.hp-=rdmg;
+    fxAttack(def,att,rdmg,false,380);
     bLog(`${du.emoji} «${du.name}» отвечает: -${rdmg} «${au.name}»`);
     if(att.hp<=0){ att.hp=0; bLog(`☠️ «${au.name}» уничтожены!`); }
   }
@@ -1864,9 +1914,15 @@ function aiAct(stack){
   else{
     const dr=Math.sign(target.row-stack.row), dc=Math.sign(target.col-stack.col);
     const nr=stack.row+dr, nc=stack.col+dc;
-    if(!bOccupied(nr,nc)&&nr>=0&&nr<6&&nc>=0&&nc<8){ stack.row=nr; stack.col=nc; }
-    else if(!bOccupied(stack.row,nc)&&nc>=0&&nc<8) stack.col=nc;
-    else if(!bOccupied(nr,stack.col)&&nr>=0&&nr<6) stack.row=nr;
+    if(!bOccupied(nr,nc)&&nr>=0&&nr<BF_ROWS&&nc>=0&&nc<BF_COLS){ stack.row=nr; stack.col=nc; }
+    else if(!bOccupied(stack.row,nc)&&nc>=0&&nc<BF_COLS) stack.col=nc;
+    else if(!bOccupied(nr,stack.col)&&nr>=0&&nr<BF_ROWS) stack.row=nr;
+    else { // обход препятствия: любая свободная соседняя клетка, не удаляющая от цели
+      const cur=dist(stack,target); let best=null;
+      for(let a=-1;a<=1;a++) for(let b=-1;b<=1;b++){ const rr=stack.row+a, cc=stack.col+b;
+        if((a||b)&&rr>=0&&rr<BF_ROWS&&cc>=0&&cc<BF_COLS&&!bOccupied(rr,cc)){ const d=dist({row:rr,col:cc},target); if(d<=cur&&(!best||d<best.d)) best={rr,cc,d}; } }
+      if(best){ stack.row=best.rr; stack.col=best.cc; }
+    }
     bLog(`${bUnit(stack).emoji} «${bUnit(stack).name}» двигается`);
   }
   renderBattle(); bEndTurn();
@@ -1883,6 +1939,7 @@ function cellClick(r,c){
     return;
   }
   if(!target){
+    if(isObst(r,c)) return;
     const mr=Math.max(1,Math.round(u.speed/2));
     if(dist(cur,{row:r,col:c})<=mr){ cur.row=r; cur.col=c; bLog(`${u.emoji} «${u.name}» перемещается`); renderBattle(); bEndTurn(); }
   }
@@ -1893,36 +1950,36 @@ function castSpell(k){
   if(!cur||cur.side!=='player'||!spellCharges[k]) return;
   spellCharges[k]--; stats.spellsCast++;
   if(k==='heal'){
-    const heal=Math.round(cur.maxHp*0.3); cur.hp=Math.min(cur.maxHp,cur.hp+heal);
+    const heal=Math.round(cur.maxHp*0.3); cur.hp=Math.min(cur.maxHp,cur.hp+heal); fxSpell(cur,'✨','+'+heal,'#8dff8a');
     bLog(`✨ Исцеление: +${heal} «${bUnit(cur).name}»`); renderBattle(); bEndTurn();
   } else if(k==='fireball'){
     const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
-    if(enemies.length){ enemies.sort((a,b)=>b.hp-a.hp); const t=enemies[0]; t.hp-=30;
+    if(enemies.length){ enemies.sort((a,b)=>b.hp-a.hp); const t=enemies[0]; t.hp-=30; fxSpell(t,'🔥','-30','#ffb14a');
       bLog(`🔥 Огненный шар: -30 «${bUnit(t).name}»`);
       if(t.hp<=0){ t.hp=0; bLog(`☠️ «${bUnit(t).name}» уничтожены!`); } }
     renderBattle(); bEndTurn();
-  } else if(k==='haste'){ bLog(`💨 Ускорение: «${bUnit(cur).name}» получает доп. ход!`); renderBattle(); }
+  } else if(k==='haste'){ fxSpell(cur,'💨'); bLog(`💨 Ускорение: «${bUnit(cur).name}» получает доп. ход!`); renderBattle(); }
   else if(k==='multiply'){
     const mult=1.25+Math.random()*0.25;
     const before=Math.ceil(cur.hp/bUnit(cur).hp);
-    cur.hp=Math.round(cur.hp*mult); cur.maxHp=Math.round(cur.maxHp*mult);
+    cur.hp=Math.round(cur.hp*mult); cur.maxHp=Math.round(cur.maxHp*mult); fxSpell(cur,'🐣');
     const after=Math.ceil(cur.hp/bUnit(cur).hp);
     bLog(`🐣 Размножение: «${bUnit(cur).name}» ×${before}→×${after}`);
     renderBattle(); bEndTurn();
   } else if(k==='resurrect'){
-    cur.hp=cur.maxHp;
+    cur.hp=cur.maxHp; fxSpell(cur,'💫');
     bLog(`💫 Воскрешение: «${bUnit(cur).name}» полностью восстановлен!`);
     renderBattle(); bEndTurn();
   } else if(k==='infection'){
     const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
     if(enemies.length){
       enemies.sort((a,b)=>b.hp-a.hp);
-      const main=enemies[0]; main.hp-=35;
+      const main=enemies[0]; main.hp-=35; fxSpell(main,'🦠','-35','#9dff6a');
       bLog(`🦠 Зараза: -35 «${bUnit(main).name}»`);
       if(main.hp<=0){ main.hp=0; bLog(`☠️ «${bUnit(main).name}» уничтожены!`); }
       const neighbors=enemies.filter(e=>e!==main && dist(main,e)<=1);
       neighbors.forEach(n=>{
-        n.hp-=15;
+        n.hp-=15; fxPush({type:'float',r:n.row,c:n.col,text:'-15',color:'#9dff6a',dur:900,delay:200});
         bLog(`🦠 Зараза распространилась: -15 «${bUnit(n).name}»`);
         if(n.hp<=0){ n.hp=0; bLog(`☠️ «${bUnit(n).name}» уничтожены!`); }
       });
@@ -1932,27 +1989,229 @@ function castSpell(k){
 }
 function renderBattle(){
   const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
-  let html='';
-  for(let r=0;r<6;r++) for(let c=0;c<8;c++){
-    let cls='cell'+(((r+c)%2)?' alt':'');
-    const occ=stacks.find(s=>s.hp>0&&s.row===r&&s.col===c);
-    if(cur&&cur.side==='player'){
-      const u=bUnit(cur);
-      if(occ){ if(occ.id===cur.id) cls+=' selected'; else if(occ.side==='enemy'){ const d=dist(cur,occ); if(u.ranged||d<=1) cls+=' attackable'; } }
-      else{ const mr=Math.max(1,Math.round(u.speed/2)); if(dist(cur,{row:r,col:c})<=mr) cls+=' reachable'; }
-    }
-    let inner=''; if(occ){ const uu=bUnit(occ); inner=`<div class="unit ${occ.side}">${uu.emoji}<span class="count-badge">${bCount(occ)}</span></div>`; }
-    html+=`<div class="${cls}" onclick="cellClick(${r},${c})">${inner}</div>`;
-  }
-  document.getElementById('battlefield').innerHTML=html;
+  ensureBattleLoop();
   const tw=document.getElementById('turnwho'), wb=document.getElementById('waitBtn'), rb=document.getElementById('retreatBtn');
   if(battleOver){ tw.textContent='Бой окончен'; wb.disabled=true; rb.disabled=true; }
   else if(cur){ tw.textContent=`${bUnit(cur).emoji} ${bUnit(cur).name} — ${cur.side==='player'?'ваш ход':'ход врага'}`; wb.disabled=cur.side!=='player'; rb.disabled=cur.side!=='player'; }
   const log=document.getElementById('log'); log.innerHTML=logLines.map(l=>`<div>${l}</div>`).join(''); log.scrollTop=log.scrollHeight;
   const sb=document.getElementById('spellbar'); let sbHtml='';
-  SPELLS.forEach(sp=>{ const owned=spellCharges[sp.key]||0; const enabled=!battleOver&&cur&&cur.side==='player'&&owned>0;
+  SPELLS.filter(sp=>(spellCharges[sp.key]||0)>0).forEach(sp=>{ const owned=spellCharges[sp.key]; const enabled=!battleOver&&cur&&cur.side==='player';
     sbHtml+=`<button class="secondary" ${enabled?'':'disabled'} onclick="castSpell('${sp.key}')">${sp.emoji} ${sp.name} (${owned})</button>`; });
+  if(!sbHtml) sbHtml=`<span style="font-size:12px;color:var(--muted);">📜 Боевых заклинаний нет — их продают в лавках городов.</span>`;
   sb.innerHTML=sbHtml;
+}
+
+/* ================= ПОЛЕ БОЯ: CANVAS =================
+   Поле BF_COLS×BF_ROWS, вокруг — поля шириной BF_M клетки для окружения (лес/скалы/трава, при осаде — стена).
+   Грунт — текстуры земли, где начался бой. Отряды — подставка цвета стороны, значок, число бойцов, полоска здоровья.
+   Анимация: логика боя мгновенная, картинка догоняет её — у каждого отряда «видимая» позиция плавно тянется
+   к логической; удары, выстрелы, урон и гибель — короткие эффекты поверх. Пока есть движение, крутится кадр-цикл. */
+const BF_COLS=10, BF_ROWS=8, BF_M=0.42;
+const BF_RATIO=(BF_COLS+2*BF_M)/(BF_ROWS+2*BF_M);
+let bfx=[], bVis={}, bAnimRunning=false, bScene=null, bTexCache={key:'',tex:null}, bObst=[];
+/* Препятствия на поле боя: 3–5 (в лесу и скалах на 2 больше), не на линиях построения и не вплотную друг к другу.
+   На них нельзя встать; стрелы и магию они не задерживают. */
+function genObstacles(scene){
+  const n=3+Math.floor(Math.random()*3)+((scene.edge==='forest'||scene.edge==='rock')?2:0), out=[]; let guard=0;
+  while(out.length<n&&guard++<300){
+    const r=Math.floor(Math.random()*BF_ROWS), c=2+Math.floor(Math.random()*(BF_COLS-4));
+    if(out.some(o=>Math.abs(o.r-r)+Math.abs(o.c-c)<2)) continue;
+    const kind=scene.siege&&Math.random()<0.5?'block':scene.edge==='forest'?(Math.random()<0.7?'tree':'rock'):scene.edge==='rock'?(Math.random()<0.8?'rock':'bush'):(Math.random()<0.5?'rock':'bush');
+    out.push({r,c,kind});
+  }
+  return out;
+}
+function isObst(r,c){ return bObst.some(o=>o.r===r&&o.c===c); }
+function bSlotRows(n){ return Array.from({length:n},(_,i)=>Math.max(0,Math.min(BF_ROWS-1,Math.round((i+0.5)*BF_ROWS/n-0.5)))); }
+/* Сцена боя: грунт и окружение по местности вокруг героя, стена — если это штурм. */
+function makeBattleScene(enc){
+  const cnt={g:0,d:0,s:0,m:0,f:0,w:0};
+  for(let dr=-3;dr<=3;dr++) for(let dc=-3;dc<=3;dc++){ const t=terrAt(hero.row+dr,hero.col+dc); if(t==='f') cnt.f++; else if(t==='w') cnt.w++; else cnt[groundAt(hero.row+dr,hero.col+dc)]++; }
+  const ground=['d','s','g'].sort((a,b)=>cnt[b]-cnt[a])[0];
+  const edge=cnt.f>=8?'forest':cnt.m>=6?'rock':cnt.w>=10?'shore':'field';
+  const siege=curEncounter&&(curEncounter.type==='capture'||curEncounter.type==='governor_war');
+  return {ground, edge, siege, wallUp:siege&&currentWallBonus>0, seed:(Date.now()%100000)};
+}
+function bNow(){ return performance.now(); }
+function fxPush(e){ e.t0=bNow()+(e.delay||0); bfx.push(e); ensureBattleLoop(); }
+function ensureBattleLoop(){ if(!bAnimRunning){ bAnimRunning=true; requestAnimationFrame(battleFrame); } }
+function battleFrame(now){ const active=drawBattleCanvas(now); if(active&&view==='battle') requestAnimationFrame(battleFrame); else bAnimRunning=false; }
+function bfCanvas(){
+  const host=document.getElementById('battlefield');
+  let cv=host.querySelector('canvas');
+  if(!cv){ host.innerHTML=''; cv=document.createElement('canvas'); host.appendChild(cv);
+    cv.addEventListener('click',e=>{ const b=cv.getBoundingClientRect(), O=bOrient(), cell=b.width/(O.SC+2*BF_M);
+      const sx=Math.floor((e.clientX-b.left)/cell-BF_M), sy=Math.floor((e.clientY-b.top)/cell-BF_M);
+      if(sx<0||sy<0||sx>=O.SC||sy>=O.SR) return;
+      const r=O.vert?sx:sy, c=O.vert?BF_COLS-1-sy:sx; cellClick(r,c); }); }
+  return cv;
+}
+/* Ориентация поля: в горизонтали армии слева (вы) и справа (враг); в вертикали поле повёрнуто —
+   вы внизу, враг вверху, клетки крупнее. Логические координаты (row, col) не меняются, переводится только картинка. */
+function bOrient(){ const vert=!document.body.classList.contains('land'); return {vert, SC:vert?BF_ROWS:BF_COLS, SR:vert?BF_COLS:BF_ROWS}; }
+function easeIO(p){ return p<0.5?2*p*p:1-2*(1-p)*(1-p); }
+function drawBattleCanvas(now){
+  if(!bScene) return false;
+  const host=document.getElementById('battlefield'), cv=bfCanvas();
+  const O=bOrient(), SC=O.SC, SR=O.SR;
+  const Wc=host.clientWidth, Hc=Math.round(Wc*(SR+2*BF_M)/(SC+2*BF_M)); if(!Wc) return false;
+  const dpr=Math.min(3,window.devicePixelRatio||1), cell=Wc/(SC+2*BF_M);
+  if(cv.width!==Math.round(Wc*dpr)||cv.height!==Math.round(Hc*dpr)){ cv.width=Math.round(Wc*dpr); cv.height=Math.round(Hc*dpr); cv.style.width=Wc+'px'; cv.style.height=Hc+'px'; }
+  const T=Math.round(cell), tk=T+'|'+dpr+'|'+curCont;
+  if(bTexCache.key!==tk) bTexCache={key:tk,tex:buildTextures(T,dpr)};
+  const tex=bTexCache.tex, P=pal(), g=cv.getContext('2d');
+  g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,Wc,Hc);
+  const XS=sx=>(sx+BF_M)*cell, YS=sy=>(sy+BF_M)*cell, sd=bScene.seed;
+  // логическая клетка (r,c) → экранные пиксели левого верхнего угла
+  const PX=(r,c)=>XS(O.vert?r:c), PY=(r,c)=>YS(O.vert?BF_COLS-1-c:r);
+  // грунт (с полями), шахматка и сетка
+  for(let sy=-1;sy<=SR;sy++) for(let sx=-1;sx<=SC;sx++) g.drawImage(tex[bScene.ground+(hash2(sy+sd,sx,5)%4)],XS(sx),YS(sy),cell+0.5,cell+0.5);
+  for(let sy=0;sy<SR;sy++) for(let sx=0;sx<SC;sx++) if((sx+sy)%2){ g.fillStyle='rgba(0,0,0,0.06)'; g.fillRect(XS(sx),YS(sy),cell,cell); }
+  g.strokeStyle='rgba(0,0,0,0.13)'; g.lineWidth=1; g.beginPath();
+  for(let sx=0;sx<=SC;sx++){ g.moveTo(XS(sx)+0.5,YS(0)); g.lineTo(XS(sx)+0.5,YS(SR)); }
+  for(let sy=0;sy<=SR;sy++){ g.moveTo(XS(0),YS(sy)+0.5); g.lineTo(XS(SC),YS(sy)+0.5); } g.stroke();
+  // мелкий декор на поле (не на линиях построения армий)
+  for(let r=0;r<BF_ROWS;r++) for(let c=1;c<BF_COLS-1;c++){ const h=hrand(r+sd,c,6), x=PX(r,c), y=PY(r,c);
+    if(h<0.07){ g.fillStyle=P.flower[hash2(r,c+sd,7)%P.flower.length]; for(let i=0;i<3;i++){ g.beginPath(); g.arc(x+cell*(0.25+hrand(r,c,8+i)*0.5),y+cell*(0.25+hrand(r,c,11+i)*0.5),Math.max(1,cell*0.03),0,Math.PI*2); g.fill(); } }
+    else if(h<0.11){ const ex=x+cell*(0.3+hrand(r,c,14)*0.4), ey=y+cell*(0.3+hrand(r,c,15)*0.4); g.fillStyle=P.rock[0]; g.beginPath(); g.ellipse(ex,ey,cell*0.07,cell*0.05,0,0,Math.PI*2); g.fill(); } }
+  // окружение по флангам (сверху и снизу в горизонтали, слева и справа в вертикали)
+  const edgeItems=[], LONG=O.vert?SR:SC, M=cell*BF_M;
+  const flankPt=(i,side,along,depth)=>{ // i — клетка вдоль фланга, depth 0..1 — глубина в поле фланга
+    const a=(O.vert?YS(i):XS(i))+cell*along, d=side?(O.vert?XS(SC):YS(SR))+cell*0.05+M*depth:M*depth;
+    return O.vert?{x:d,y:a}:{x:a,y:d}; };
+  for(let i=-1;i<=LONG;i++) for(const side of [0,1]){
+    const k=hash2(i+sd,side,20);
+    if(bScene.edge==='forest'||(bScene.edge==='field'&&k%5===0)){ for(let j=0;j<2;j++){ const pt=flankPt(i,side,0.25+hrand(i,side,21+j)*0.5,0.35+hrand(i,side,23+j)*0.5); edgeItems.push({kind:'tree',x:pt.x,y:pt.y,r:cell*(0.2+hrand(i,side,25+j)*0.1)}); } }
+    else if(bScene.edge==='rock'||(bScene.edge==='field'&&k%5===1)){ const pt=flankPt(i,side,0.5+(hrand(i,side,27)-0.5)*0.4,0.6); edgeItems.push({kind:'rock',x:pt.x,y:pt.y,r:cell*(0.16+hrand(i,side,28)*0.12)}); }
+    else if(bScene.edge==='shore'&&side===0){
+      if(O.vert){ g.drawImage(tex['w'+(i&3)],0,YS(i),XS(0)-cell*0.12,cell+0.5); g.fillStyle=P.beach; g.fillRect(XS(0)-cell*0.14,YS(i),cell*0.1,cell+0.5); }
+      else { g.drawImage(tex['w'+(i&3)],XS(i),0,cell+0.5,YS(0)-cell*0.12); g.fillStyle=P.beach; g.fillRect(XS(i),YS(0)-cell*0.14,cell+0.5,cell*0.1); } }
+  }
+  edgeItems.sort((a,b)=>a.y-b.y).forEach(o=>{
+    if(o.kind==='tree'){ const {x,y,r}=o;
+      g.fillStyle='rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(x+r*0.2,y+r*0.9,r*0.95,r*0.35,0,0,Math.PI*2); g.fill();
+      g.fillStyle=P.tree[0]; g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.fill();
+      g.fillStyle=P.tree[1]; g.beginPath(); g.arc(x-r*0.15,y-r*0.15,r*0.75,0,Math.PI*2); g.fill();
+      g.fillStyle=P.tree[2]; g.beginPath(); g.arc(x-r*0.3,y-r*0.32,r*0.35,0,Math.PI*2); g.fill(); }
+    else { const {x,y,r}=o; g.fillStyle='rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(x+r*0.2,y+r*0.5,r*1.1,r*0.4,0,0,Math.PI*2); g.fill();
+      g.fillStyle=P.peak[0]; g.beginPath(); g.ellipse(x,y,r,r*0.75,0,0,Math.PI*2); g.fill(); g.fillStyle=P.peak[1]; g.beginPath(); g.ellipse(x-r*0.25,y-r*0.25,r*0.45,r*0.32,0,0,Math.PI*2); g.fill(); }
+  });
+  // крепостная стена за строем защитников (или её руины)
+  if(bScene.siege){
+    g.save();
+    // рисуем стену как вертикальную у правого края, при вертикальном поле поворачиваем на верхний край
+    let L=Hc; if(O.vert){ g.translate(0,Hc); g.rotate(-Math.PI/2); L=Wc; } // поворот −90°: «правый край» становится верхним
+    const wx=(O.vert?Hc:Wc)-M+cell*0.04, ww=M-cell*0.04;
+    if(bScene.wallUp){
+      g.fillStyle='rgba(0,0,0,0.3)'; g.fillRect(wx-cell*0.08,M,cell*0.08,L-2*M);
+      g.fillStyle=P.peak[0]; g.fillRect(wx,0,ww,L);
+      g.fillStyle='rgba(255,255,255,0.12)'; for(let y=0;y<L;y+=cell*0.22){ g.fillRect(wx,y,ww,1); }
+      g.fillStyle=P.peak[1]; for(let y=cell*0.1;y<L;y+=cell*0.5) g.fillRect(wx-cell*0.07,y,cell*0.1,cell*0.25);
+      [0.3,0.7].forEach(f=>{ const ty=L*f; g.fillStyle=P.peak[0]; g.fillRect(wx-cell*0.15,ty-cell*0.45,ww+cell*0.15,cell*0.9); g.fillStyle='rgba(0,0,0,0.35)'; g.fillRect(wx-cell*0.05,ty-cell*0.12,cell*0.08,cell*0.22); });
+    } else {
+      for(let i=0;i<10;i++){ const y=L*hrand(i,sd,30), r=cell*(0.08+hrand(i,sd,31)*0.1); g.fillStyle=i%2?P.peak[0]:P.peak[1]; g.beginPath(); g.ellipse(wx+ww*hrand(i,sd,32),y,r*1.2,r,0,0,Math.PI*2); g.fill(); }
+    }
+    g.restore();
+  }
+  // активный отряд, подсветка ходов и целей
+  const cur=order[idx]&&stacks.find(s=>s.id===order[idx].id&&s.hp>0);
+  const myTurn=!battleOver&&cur&&cur.side==='player';
+  if(myTurn){
+    const u=bUnit(cur), mr=Math.max(1,Math.round(u.speed/2));
+    for(let r=0;r<BF_ROWS;r++) for(let c=0;c<BF_COLS;c++){
+      if(bOccupied(r,c)||dist(cur,{row:r,col:c})>mr) continue;
+      g.fillStyle='rgba(170,255,150,0.16)'; g.fillRect(PX(r,c)+2,PY(r,c)+2,cell-4,cell-4);
+      g.fillStyle='rgba(200,255,180,0.6)'; g.beginPath(); g.arc(PX(r,c)+cell/2,PY(r,c)+cell/2,Math.max(1.5,cell*0.05),0,Math.PI*2); g.fill();
+    }
+  }
+  // препятствия
+  bObst.slice().sort((a,b)=>PY(a.r,a.c)-PY(b.r,b.c)).forEach(o=>{
+    const x=PX(o.r,o.c), y=PY(o.r,o.c), cx=x+cell/2, cy=y+cell/2;
+    g.fillStyle='rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(cx+cell*0.05,cy+cell*0.3,cell*0.38,cell*0.12,0,0,Math.PI*2); g.fill();
+    if(o.kind==='tree'){ [[0,-0.05,0.3],[-0.14,0.08,0.22],[0.15,0.1,0.2]].forEach(([dx,dy,rr],i)=>{ const tx=cx+dx*cell, ty=cy+dy*cell, R=rr*cell;
+        g.fillStyle=P.tree[0]; g.beginPath(); g.arc(tx,ty,R,0,Math.PI*2); g.fill(); g.fillStyle=P.tree[1]; g.beginPath(); g.arc(tx-R*0.15,ty-R*0.15,R*0.75,0,Math.PI*2); g.fill();
+        g.fillStyle=P.tree[2]; g.beginPath(); g.arc(tx-R*0.3,ty-R*0.32,R*0.35,0,Math.PI*2); g.fill(); if(curCont===2){ g.fillStyle='rgba(255,255,255,0.85)'; g.beginPath(); g.arc(tx-R*0.2,ty-R*0.45,R*0.27,0,Math.PI*2); g.fill(); } }); }
+    else if(o.kind==='rock'){ g.fillStyle=P.peak[0]; g.beginPath(); g.moveTo(cx-cell*0.38,cy+cell*0.28); g.lineTo(cx-cell*0.28,cy-cell*0.12); g.lineTo(cx-cell*0.02,cy-cell*0.3); g.lineTo(cx+cell*0.3,cy-cell*0.14); g.lineTo(cx+cell*0.38,cy+cell*0.28); g.closePath(); g.fill();
+      g.fillStyle=P.peak[1]; g.beginPath(); g.moveTo(cx-cell*0.28,cy-cell*0.12); g.lineTo(cx-cell*0.02,cy-cell*0.3); g.lineTo(cx+cell*0.04,cy+cell*0.05); g.lineTo(cx-cell*0.22,cy+cell*0.1); g.closePath(); g.fill();
+      g.strokeStyle='rgba(0,0,0,0.35)'; g.lineWidth=1; g.stroke(); }
+    else if(o.kind==='bush'){ [[-0.15,0.05,0.18],[0.12,0.06,0.17],[0,-0.08,0.2]].forEach(([dx,dy,rr])=>{ g.fillStyle=P.grass[1]; g.beginPath(); g.arc(cx+dx*cell,cy+dy*cell,rr*cell,0,Math.PI*2); g.fill(); g.fillStyle=P.grass[2]; g.beginPath(); g.arc(cx+dx*cell-rr*cell*0.25,cy+dy*cell-rr*cell*0.25,rr*cell*0.5,0,Math.PI*2); g.fill(); });
+      g.fillStyle=P.flower[0]; g.beginPath(); g.arc(cx+cell*0.05,cy-cell*0.05,Math.max(1.5,cell*0.03),0,Math.PI*2); g.fill(); }
+    else { g.fillStyle=P.peak[1]; g.fillRect(cx-cell*0.32,cy-cell*0.18,cell*0.64,cell*0.42); g.fillStyle=P.peak[0]; g.fillRect(cx-cell*0.32,cy+cell*0.08,cell*0.64,cell*0.16);
+      g.strokeStyle='rgba(0,0,0,0.4)'; g.lineWidth=1; g.strokeRect(cx-cell*0.32,cy-cell*0.18,cell*0.64,cell*0.42); g.beginPath(); g.moveTo(cx,cy-cell*0.18); g.lineTo(cx,cy+cell*0.08); g.stroke(); }
+  });
+  let active=bfx.length>0;
+  // видимые позиции отрядов (плавное перемещение)
+  const pos={};
+  stacks.forEach(s=>{
+    let v=bVis[s.id]; if(!v) v=bVis[s.id]={r:s.row,c:s.col,fr:s.row,fc:s.col,tr:s.row,tc:s.col,t0:0};
+    if(v.tr!==s.row||v.tc!==s.col){ v.fr=v.r; v.fc=v.c; v.tr=s.row; v.tc=s.col; v.t0=now; }
+    const p=Math.min(1,(now-v.t0)/240), e=easeIO(p); v.r=v.fr+(v.tr-v.fr)*e; v.c=v.fc+(v.tc-v.fc)*e; if(p<1) active=true;
+    if(s.hp<=0){ if(v.deadAt===undefined) v.deadAt=now+260; } else v.deadAt=undefined;
+    let ox=0, oy=0;
+    bfx.forEach(f=>{ if(f.id!==s.id||now<f.t0) return; const q=(now-f.t0)/f.dur; if(q>1) return;
+      if(f.type==='lunge'){ const k=Math.sin(Math.PI*q)*0.32; ox+=f.dc*k; oy+=f.dr*k; }
+      if(f.type==='hit'){ ox+=Math.sin(q*Math.PI*6)*0.05*(1-q); } });
+    pos[s.id]={r:v.r+oy,c:v.c+ox};
+  });
+  // отряды (сверху вниз)
+  const fs=Math.round(cell*0.56);
+  stacks.slice().sort((a,b)=>PY(pos[a.id].r,pos[a.id].c)-PY(pos[b.id].r,pos[b.id].c)).forEach(s=>{
+    const v=bVis[s.id]; let alpha=1;
+    if(s.hp<=0){ const q=(now-v.deadAt)/500; if(q>=1) return; active=true; alpha=Math.max(0,1-Math.max(0,q)); }
+    const cx=PX(pos[s.id].r,pos[s.id].c)+cell/2, cy=PY(pos[s.id].r,pos[s.id].c)+cell/2, u=bUnit(s), team=s.side==='player'?'#4d84c4':'#c0463f';
+    g.globalAlpha=alpha;
+    g.fillStyle='rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(cx+cell*0.04,cy+cell*0.3,cell*0.36,cell*0.12,0,0,Math.PI*2); g.fill();
+    g.fillStyle=team; g.beginPath(); g.ellipse(cx,cy+cell*0.24,cell*0.34,cell*0.13,0,0,Math.PI*2); g.fill();
+    g.strokeStyle='rgba(255,255,255,0.45)'; g.lineWidth=Math.max(1,cell*0.025); g.stroke();
+    if(cur&&s.id===cur.id&&!battleOver){ const pulse=0.5+0.5*Math.sin(now/220); g.strokeStyle=`rgba(255,215,80,${0.55+0.45*pulse})`; g.lineWidth=Math.max(2,cell*0.05);
+      g.beginPath(); g.ellipse(cx,cy+cell*0.24,cell*0.42,cell*0.17,0,0,Math.PI*2); g.stroke(); active=true; }
+    if(myTurn&&s.side==='enemy'&&s.hp>0&&(bUnit(cur).ranged||dist(cur,s)<=1)){ g.strokeStyle='rgba(255,90,80,0.95)'; g.lineWidth=Math.max(2,cell*0.05);
+      g.setLineDash([cell*0.08,cell*0.06]); g.beginPath(); g.ellipse(cx,cy+cell*0.24,cell*0.44,cell*0.18,0,0,Math.PI*2); g.stroke(); g.setLineDash([]); }
+    // вспышка попадания
+    const hit=bfx.find(f=>f.type==='hit'&&f.id===s.id&&now>=f.t0&&now-f.t0<f.dur);
+    g.textAlign='center'; g.textBaseline='middle'; g.font=`${fs}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    g.fillStyle='#000'; g.fillText(u.emoji,cx,cy-cell*0.04);
+    if(hit){ g.fillStyle=`rgba(255,60,40,${0.45*(1-(now-hit.t0)/hit.dur)})`; g.beginPath(); g.arc(cx,cy-cell*0.04,cell*0.33,0,Math.PI*2); g.fill(); }
+    // число бойцов
+    const n=String(bCount(s)), pw=Math.max(cell*0.3,cell*0.13*n.length+cell*0.12), ph=cell*0.24, px=cx+cell*0.42-pw, py=cy+cell*0.12;
+    g.fillStyle=s.side==='player'?'#2c5a8f':'#8f2d28'; pathRoundRect(g,px,py,pw,ph,[ph/2,ph/2,ph/2,ph/2]); g.fill();
+    g.strokeStyle='rgba(255,255,255,0.6)'; g.lineWidth=1; g.stroke();
+    g.fillStyle='#fff'; g.font=`bold ${Math.round(cell*0.17)}px sans-serif`; g.fillText(n,px+pw/2,py+ph/2+0.5);
+    // здоровье отряда
+    const hpF=Math.max(0,Math.min(1,s.hp/(s.maxHp||1))), bw=cell*0.62, bx=cx-bw/2, by=cy+cell*0.4;
+    g.fillStyle='rgba(0,0,0,0.55)'; g.fillRect(bx,by,bw,Math.max(2,cell*0.05));
+    g.fillStyle=hpF>0.5?'#6fd36a':hpF>0.25?'#e8c547':'#e5534b'; g.fillRect(bx,by,bw*hpF,Math.max(2,cell*0.05));
+    g.globalAlpha=1;
+  });
+  // эффекты: выстрелы, всплески, всплывающие числа
+  bfx=bfx.filter(f=>now<f.t0+f.dur+30);
+  bfx.forEach(f=>{
+    if(now<f.t0) return; const q=Math.min(1,(now-f.t0)/f.dur);
+    if(f.type==='shot'){ const lr=f.fr+(f.tr-f.fr)*q, lc=f.fc+(f.tc-f.fc)*q, x=PX(lr,lc)+cell/2, y=PY(lr,lc)+cell/2-Math.sin(Math.PI*q)*cell*0.6;
+      const dx=PX(f.tr,f.tc)-PX(f.fr,f.fc), dy=PY(f.tr,f.tc)-PY(f.fr,f.fc), dl=Math.hypot(dx,dy)||1;
+      g.fillStyle='#fff3c4'; g.beginPath(); g.arc(x,y,Math.max(2,cell*0.06),0,Math.PI*2); g.fill();
+      g.strokeStyle='rgba(255,243,196,0.5)'; g.lineWidth=Math.max(1,cell*0.03); g.beginPath(); g.moveTo(x,y); g.lineTo(x-dx/dl*cell*0.3,y-dy/dl*cell*0.3+cell*0.05); g.stroke(); }
+    if(f.type==='burst'){ g.globalAlpha=1-q; g.font=`${Math.round(cell*(0.5+q*0.6))}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; g.fillStyle='#000';
+      g.textAlign='center'; g.textBaseline='middle'; g.fillText(f.emoji,PX(f.r,f.c)+cell/2,PY(f.r,f.c)+cell/2-cell*0.1); g.globalAlpha=1; }
+    if(f.type==='float'){ g.globalAlpha=q<0.7?1:1-(q-0.7)/0.3; g.font=`bold ${Math.round(cell*0.3)}px sans-serif`; g.textAlign='center'; g.textBaseline='middle';
+      const x=PX(f.r,f.c)+cell/2, y=PY(f.r,f.c)+cell*0.1-q*cell*0.55; g.lineWidth=3; g.strokeStyle='rgba(0,0,0,0.7)'; g.strokeText(f.text,x,y); g.fillStyle=f.color; g.fillText(f.text,x,y); g.globalAlpha=1; }
+  });
+  // виньетка
+  const vg=g.createRadialGradient(Wc/2,Hc/2,Math.min(Wc,Hc)*0.4,Wc/2,Hc/2,Math.max(Wc,Hc)*0.72); vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.3)'); g.fillStyle=vg; g.fillRect(0,0,Wc,Hc);
+  return active;
+}
+/* Эффекты для логики боя */
+function fxAttack(att,def,dmg,ranged,delay){
+  const d0=delay||0;
+  if(ranged){ fxPush({type:'shot',fr:att.row,fc:att.col,tr:def.row,tc:def.col,dur:300,delay:d0}); }
+  else { const dr=Math.sign(def.row-att.row), dc=Math.sign(def.col-att.col); fxPush({type:'lunge',id:att.id,dr,dc,dur:280,delay:d0}); }
+  const hitAt=d0+(ranged?290:140);
+  fxPush({type:'hit',id:def.id,dur:320,delay:hitAt});
+  fxPush({type:'float',r:def.row,c:def.col,text:'-'+dmg,color:'#ff7b6b',dur:950,delay:hitAt});
+}
+function fxSpell(target,emoji,text,color){
+  fxPush({type:'burst',r:target.row,c:target.col,emoji,dur:600});
+  if(text) fxPush({type:'float',r:target.row,c:target.col,text,color:color||'#ffffff',dur:950,delay:150});
 }
 
 /* ================= MAP RENDER (camera viewport) ================= */
@@ -1981,14 +2240,12 @@ function layoutViewport(){
     cols=odd(clampN(Math.floor(availW/tile),9,25));
     tile=Math.min(tile,Math.floor(availW/cols));
     // поле боя 8×6 слева на всю высоту
-    const bh=Math.min(availH+frame, (availW+frame)*6/8);
-    bf.style.height=Math.floor(bh)+'px'; bf.style.width=Math.floor(bh*8/6)+'px'; bf.style.maxWidth='none'; bf.style.aspectRatio='auto';
-    bf.style.setProperty('--bunit',Math.floor(bh/6*0.5)+'px');
+    const bh=Math.min(availH+frame-4, (availW+frame-4)/BF_RATIO);
+    bf.style.width=Math.floor(bh*BF_RATIO)+'px'; bf.style.maxWidth='none';
     document.body.style.setProperty('--appH',(H-padY)+'px');
   } else {
     document.body.style.removeProperty('--side'); document.body.style.removeProperty('--appH');
-    bf.style.height=''; bf.style.width=''; bf.style.maxWidth=''; bf.style.aspectRatio='';
-    bf.style.setProperty('--bunit',Math.floor(Math.min(560,W-padX)/8*0.48)+'px');
+    bf.style.width=''; bf.style.maxWidth='';
     const availW=Math.min(680,W-padX)-frame;
     cols=13; tile=Math.floor(availW/cols);
     if(tile>TILE_MAX){ tile=TILE_MAX; }
@@ -2023,6 +2280,8 @@ window.addEventListener('orientationchange',relayout);
 })();
 
 function tileIcon(r,c){
+  if(!isExplored(r,c)&&!(r===hero.row&&c===hero.col)) return '';
+  { const qs=pois.find(q=>q.type==='qspot'&&q.r===r&&q.c===c); if(qs&&qs.hidden&&!(r===hero.row&&c===hero.col)) return ''; }
   if(r===hero.row&&c===hero.col) return onShip?'⛵':heroEmoji();
   if(shipPos && r===shipPos.r && c===shipPos.c) return '⛵';
   if(sorcerer && sorcerer.active && r===sorcerer.r && c===sorcerer.c) return '🌑';
@@ -2045,7 +2304,8 @@ function renderMap(){
     const t=TERRAIN[tch(r,c)];
     const reach=dist[key(r,c)]!==undefined && !(r===hero.row&&c===hero.col);
     const canModify=!reach && adjacent(r,c) && (tch(r,c)==='f'||tch(r,c)==='w'||tch(r,c)==='m');
-    html+=`<div class="tile${reach?' reachable':''}${canModify?' modifiable':''}" style="background:${t.color}" onclick="tileClick(${r},${c})"><span class="icon">${tileIcon(r,c)}</span></div>`;
+    const ex=isExplored(r,c);
+    html+=`<div class="tile${reach&&ex?' reachable':''}${canModify&&ex?' modifiable':''}" style="background:${ex?t.color:'#0e0c0a'}" onclick="tileClick(${r},${c})"><span class="icon">${tileIcon(r,c)}</span></div>`;
   }
   mapEl.innerHTML=html;
   updateHud();
@@ -2131,6 +2391,7 @@ function buildTextures(T,dpr){
   }
   tex.beach=make((g,rng)=>{ g.fillStyle=P.beach; g.fillRect(0,0,T,T); speckle(g,rng,[P.sand[1]],Math.round(T*0.4),T*0.03,T*0.03); },600);
   tex.foam=make(g=>{ g.fillStyle='rgba(255,255,255,0.55)'; g.fillRect(0,0,T,T); },700);
+  tex.fog=make((g,rng)=>{ g.fillStyle='#100d0a'; g.fillRect(0,0,T,T); for(let i=0;i<T*0.6;i++){ g.fillStyle=`rgba(255,240,220,${0.02+rng()*0.03})`; g.fillRect(rng()*T,rng()*T,T*0.08,T*0.05); } },800);
   return tex;
 }
 /* Маска рваной полосы вдоль стороны (dir = N/E/S/W) или пятна в углу (NE/SE/SW/NW). Глубина на концах полосы фиксирована,
@@ -2257,13 +2518,25 @@ function drawWorld(g,T,dpr,R0,C0,nR,nC,opts){
       if(P.peak[2]){ g.fillStyle=P.peak[2]; g.beginPath(); g.moveTo(px,py); g.lineTo(px-w*0.28,py+h*0.28); g.lineTo(px+w*0.28,py+h*0.28); g.closePath(); g.fill(); }
     }
   });
+  // туман войны: неразведанное — тёмная ткань, у границы — рваная тёмная кромка на разведанных клетках
+  if(fog){
+    for(let r=R0;r<R0+nR;r++) for(let c=C0;c<C0+nC;c++){
+      const x=X(c), y=Y(r);
+      if(!isExplored(r,c)){ blit(tex.fog,x,y); continue; }
+      const v=hash2(r,c,9)%2;
+      ['N','E','S','W'].forEach(d=>{ if(!isExplored(r+DIRS8G[d][0],c+DIRS8G[d][1])) blit(overlayTex(T,dpr,'fog',d,0.42,v),x,y); });
+      [['NE','N','E'],['SE','S','E'],['SW','S','W'],['NW','N','W']].forEach(([d,a,b])=>{ const u=k=>!isExplored(r+DIRS8G[k][0],c+DIRS8G[k][1]); if(u(d)&&!u(a)&&!u(b)) blit(overlayTex(T,dpr,'fog',d,0.42,v),x,y); });
+    }
+  }
   // 7: значки (героя — по желанию: в анимации он рисуется отдельно)
   const fs=Math.round(T*0.64);
   g.textAlign='center'; g.textBaseline='middle'; g.font=`${fs}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  // объекты: построки сверху вниз, чтобы башни нижнего ряда перекрывали верхний; в анимации шага под героем
+  // рисуется то, что стоит на клетке (город, замок, монстр) — раньше на время пути эта клетка пустела
   for(let r=R0;r<R0+nR;r++) for(let c=C0;c<C0+nC;c++){
-    if(!opts.hero && r===hero.row && c===hero.col) continue;
-    const icon=tileIcon(r,c); if(!icon) continue;
-    drawIcon(g,icon,X(c),Y(r),T);
+    const o=objectAt(r,c,!opts.hero); if(!o) continue;
+    drawObject(g,o,X(c),Y(r),T,dpr);
+    if(questTargetAt(r,c)) drawQuestBadge(g,X(c),Y(r),T);
   }
 }
 function isMtn(r,c){ return terrAt(r,c)==='m'; }
@@ -2331,6 +2604,130 @@ function drawCliff(g,o,T,P){
   if(!E){ g.strokeStyle='rgba(0,0,0,0.22)'; g.lineWidth=Math.max(1,T*0.04); g.beginPath(); g.moveTo(x1-1,y0+tr); g.lineTo(x1-1,topBottom); g.stroke(); }
   if(!W){ g.strokeStyle='rgba(255,255,255,0.15)'; g.lineWidth=Math.max(1,T*0.03); g.beginPath(); g.moveTo(x0+1,y0+tl); g.lineTo(x0+1,topBottom); g.stroke(); }
 }
+/* ================= СПРАЙТЫ ОБЪЕКТОВ КАРТЫ =================
+   Постройки рисуются кодом в едином «настольном» стиле (контур, 2–3 тона, тень), существа и герои — фишками:
+   цветная подставка с кольцом и значком. Спрайт выше клетки (SPR_H), чтобы башни и крыши выступали над ней.
+   Кешируются по размеру клетки и земле. */
+const SPR_H=1.3;
+let sprCache={key:'',m:{}};
+function sprite(kind,T,dpr,extra){
+  const ck=T+'|'+dpr+'|'+curCont; if(sprCache.key!==ck) sprCache={key:ck,m:{}};
+  const k=kind+'|'+(extra||''); if(sprCache.m[k]) return sprCache.m[k];
+  const cv=document.createElement('canvas'); cv.width=Math.ceil(T*dpr); cv.height=Math.ceil(T*SPR_H*dpr);
+  const g=cv.getContext('2d'); g.scale(dpr,dpr); g.translate(0,T*(SPR_H-1));
+  g.lineJoin='round'; g.lineCap='round'; g.strokeStyle='rgba(32,22,12,0.9)'; g.lineWidth=Math.max(1,T*0.035);
+  (SPRITES[kind]||SPRITES.token)(g,T,extra||'');
+  sprCache.m[k]=cv; return cv;
+}
+function sp_poly(g,T,pts,fill,noStroke){ g.beginPath(); pts.forEach(([x,y],i)=>i?g.lineTo(x*T,y*T):g.moveTo(x*T,y*T)); g.closePath(); g.fillStyle=fill; g.fill(); if(!noStroke) g.stroke(); }
+function sp_rect(g,T,x,y,w,h,fill,noStroke){ g.fillStyle=fill; g.fillRect(x*T,y*T,w*T,h*T); if(!noStroke) g.strokeRect(x*T,y*T,w*T,h*T); }
+function sp_shadow(g,T,cx,w){ g.fillStyle='rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(cx*T,0.88*T,w*T,0.1*T,0,0,Math.PI*2); g.fill(); }
+function sp_house(g,T,x,y,w,h,roof){
+  sp_rect(g,T,x,y,w,h,'#eadcb8');
+  sp_rect(g,T,x+w*0.62,y,w*0.38,h,'rgba(0,0,0,0.12)',true);
+  sp_poly(g,T,[[x-0.03,y],[x+w/2,y-h*0.75],[x+w+0.03,y]],roof);
+  sp_poly(g,T,[[x+w/2,y-h*0.75],[x+w+0.03,y],[x+w/2,y]],'rgba(0,0,0,0.18)',true);
+  sp_rect(g,T,x+w*0.38,y+h*0.45,w*0.24,h*0.55,'#5a3a22');
+  sp_rect(g,T,x+w*0.1,y+h*0.2,w*0.18,h*0.22,'#ffd76a');
+}
+function sp_crenels(g,T,x,y,w,n,col){ const cw=w/(n*2-1); for(let i=0;i<n;i++) sp_rect(g,T,x+i*2*cw,y-0.06,cw,0.06,col); }
+function sp_flag(g,T,x,y,col){ g.beginPath(); g.moveTo(x*T,y*T); g.lineTo(x*T,(y-0.3)*T); g.stroke(); sp_poly(g,T,[[x,y-0.3],[x+0.2,y-0.25],[x,y-0.18]],col); }
+const SPRITES={
+  token(g,T,extra){
+    const [emoji,ring]=extra.split('|');
+    g.fillStyle='rgba(0,0,0,0.32)'; g.beginPath(); g.ellipse(0.52*T,0.86*T,0.36*T,0.11*T,0,0,Math.PI*2); g.fill();
+    g.fillStyle=ring||'#888'; g.beginPath(); g.ellipse(0.5*T,0.8*T,0.34*T,0.12*T,0,0,Math.PI*2); g.fill(); g.stroke();
+    g.fillStyle='rgba(255,255,255,0.35)'; g.beginPath(); g.ellipse(0.5*T,0.77*T,0.24*T,0.06*T,0,0,Math.PI*2); g.fill();
+    g.textAlign='center'; g.textBaseline='middle'; g.font=`${Math.round(T*0.66)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    g.fillStyle='#000'; g.fillText(emoji||'?',0.5*T,0.45*T);
+  },
+  city(g,T){ sp_shadow(g,T,0.5,0.44);
+    sp_house(g,T,0.06,0.56,0.3,0.28,'#b5462f'); sp_house(g,T,0.64,0.58,0.28,0.26,'#3f6e9e'); sp_house(g,T,0.3,0.48,0.4,0.38,'#c9802f'); },
+  capital(g,T){ sp_shadow(g,T,0.5,0.46);
+    sp_house(g,T,0.02,0.6,0.28,0.26,'#b5462f'); sp_house(g,T,0.7,0.6,0.28,0.26,'#3f6e9e');
+    sp_rect(g,T,0.33,0.18,0.34,0.68,'#cfc6b4'); sp_rect(g,T,0.55,0.18,0.12,0.68,'rgba(0,0,0,0.13)',true); sp_crenels(g,T,0.33,0.18,0.34,3,'#cfc6b4');
+    sp_rect(g,T,0.44,0.6,0.12,0.26,'#4a321d'); sp_rect(g,T,0.39,0.32,0.07,0.1,'#ffd76a'); sp_rect(g,T,0.54,0.32,0.07,0.1,'#ffd76a');
+    sp_flag(g,T,0.5,0.12,'#e3b23c'); },
+  castle(g,T,v){ sp_shadow(g,T,0.5,0.47);
+    const ruin=v==='ruin', stone=ruin?'#8e8678':'#bdb4a2', dark='rgba(0,0,0,0.15)';
+    sp_rect(g,T,0.12,0.5,0.76,0.36,stone); sp_rect(g,T,0.6,0.5,0.28,0.36,dark,true);
+    sp_rect(g,T,0.04,0.3,0.22,0.56,stone); sp_rect(g,T,0.74,0.3,0.22,0.56,stone); sp_rect(g,T,0.85,0.3,0.11,0.56,dark,true);
+    sp_rect(g,T,0.34,0.16,0.32,0.7,stone); sp_rect(g,T,0.53,0.16,0.13,0.7,dark,true);
+    if(ruin){ g.fillStyle='rgba(60,50,40,0.9)';
+      sp_poly(g,T,[[0.34,0.16],[0.42,0.1],[0.48,0.2],[0.56,0.08],[0.66,0.16]],stone);
+      sp_poly(g,T,[[0.04,0.3],[0.1,0.24],[0.16,0.32],[0.26,0.26],[0.26,0.3]],stone);
+      g.fillStyle='rgba(90,90,90,0.55)'; [[0.62,0.0,0.1],[0.7,-0.12,0.08],[0.6,-0.2,0.06]].forEach(([x,y,r])=>{ g.beginPath(); g.arc(x*T,y*T,r*T,0,Math.PI*2); g.fill(); });
+    } else { sp_crenels(g,T,0.04,0.3,0.22,2,stone); sp_crenels(g,T,0.74,0.3,0.22,2,stone); sp_crenels(g,T,0.34,0.16,0.32,3,stone); sp_crenels(g,T,0.26,0.5,0.08,1,stone); sp_crenels(g,T,0.66,0.5,0.08,1,stone);
+      const col=v==='own'?'#3f7fd0':v==='gov'?'#e3b23c':'#c0392b'; sp_flag(g,T,0.5,0.1,col);
+      if(v==='gov'){ sp_poly(g,T,[[0.53,-0.16],[0.56,-0.22],[0.59,-0.17],[0.62,-0.23],[0.64,-0.16]],'#fff2b0'); } }
+    g.fillStyle='#2e2015'; g.beginPath(); g.moveTo(0.42*T,0.86*T); g.lineTo(0.42*T,0.66*T); g.arc(0.5*T,0.66*T,0.08*T,Math.PI,0); g.lineTo(0.58*T,0.86*T); g.closePath(); g.fill(); g.stroke();
+    sp_rect(g,T,0.12,0.4,0.06,0.08,'#2e2015',true); sp_rect(g,T,0.82,0.4,0.06,0.08,'#2e2015',true); },
+  port(g,T){ sp_shadow(g,T,0.5,0.42);
+    sp_rect(g,T,0.06,0.62,0.88,0.16,'#9a6b3c'); for(let i=1;i<6;i++){ g.beginPath(); g.moveTo((0.06+i*0.147)*T,0.62*T); g.lineTo((0.06+i*0.147)*T,0.78*T); g.stroke(); }
+    [0.12,0.48,0.86].forEach(x=>sp_rect(g,T,x-0.03,0.6,0.06,0.3,'#6b4423'));
+    sp_house(g,T,0.12,0.36,0.32,0.26,'#7a5a3a');
+    g.beginPath(); g.moveTo(0.72*T,0.6*T); g.lineTo(0.72*T,0.14*T); g.stroke(); sp_poly(g,T,[[0.73,0.16],[0.94,0.5],[0.73,0.5]],'#f2ead6'); sp_poly(g,T,[[0.72,0.14],[0.6,0.18],[0.72,0.22]],'#c0392b'); },
+  cave(g,T){ sp_shadow(g,T,0.5,0.46);
+    sp_poly(g,T,[[0.04,0.86],[0.14,0.46],[0.34,0.26],[0.62,0.22],[0.86,0.4],[0.96,0.86]],'#8a8173');
+    sp_poly(g,T,[[0.62,0.22],[0.86,0.4],[0.96,0.86],[0.66,0.86]],'rgba(0,0,0,0.15)',true);
+    g.fillStyle='#1a120c'; g.beginPath(); g.moveTo(0.3*T,0.86*T); g.lineTo(0.3*T,0.64*T); g.quadraticCurveTo(0.5*T,0.38*T,0.7*T,0.64*T); g.lineTo(0.7*T,0.86*T); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle='rgba(90,140,60,0.7)'; g.beginPath(); g.ellipse(0.3*T,0.34*T,0.1*T,0.04*T,0,0,Math.PI*2); g.fill(); },
+  camp(g,T){ sp_shadow(g,T,0.5,0.42);
+    sp_poly(g,T,[[0.14,0.86],[0.5,0.24],[0.86,0.86]],'#e8dcc0');
+    g.save(); g.beginPath(); g.moveTo(0.14*T,0.86*T); g.lineTo(0.5*T,0.24*T); g.lineTo(0.86*T,0.86*T); g.closePath(); g.clip();
+    g.fillStyle='#b5462f'; for(let i=0;i<4;i++) g.fillRect((0.2+i*0.18)*T,0,0.08*T,T); g.restore();
+    sp_poly(g,T,[[0.14,0.86],[0.5,0.24],[0.86,0.86]],'rgba(0,0,0,0)');
+    sp_poly(g,T,[[0.42,0.86],[0.5,0.6],[0.58,0.86]],'#3a2414'); sp_flag(g,T,0.5,0.24,'#e3b23c'); },
+  chest(g,T){ sp_shadow(g,T,0.5,0.34);
+    sp_rect(g,T,0.2,0.52,0.6,0.32,'#8b5a2b'); sp_rect(g,T,0.58,0.52,0.22,0.32,'rgba(0,0,0,0.15)',true);
+    g.fillStyle='#a26a33'; g.beginPath(); g.moveTo(0.18*T,0.54*T); g.lineTo(0.18*T,0.46*T); g.quadraticCurveTo(0.5*T,0.28*T,0.82*T,0.46*T); g.lineTo(0.82*T,0.54*T); g.closePath(); g.fill(); g.stroke();
+    [0.3,0.66].forEach(x=>sp_rect(g,T,x,0.38,0.05,0.46,'#e3b23c')); sp_rect(g,T,0.45,0.5,0.1,0.12,'#f4d36a'); },
+  scroll(g,T){ sp_shadow(g,T,0.5,0.32);
+    sp_rect(g,T,0.24,0.44,0.52,0.3,'#efe1b5'); [[0.24],[0.76]].forEach(([x])=>{ g.fillStyle='#d9c48c'; g.beginPath(); g.ellipse(x*T,0.59*T,0.06*T,0.17*T,0,0,Math.PI*2); g.fill(); g.stroke(); });
+    g.strokeStyle='rgba(90,60,30,0.5)'; [0.52,0.58,0.64].forEach(y=>{ g.beginPath(); g.moveTo(0.32*T,y*T); g.lineTo(0.66*T,y*T); g.stroke(); });
+    g.strokeStyle='rgba(32,22,12,0.9)'; sp_rect(g,T,0.46,0.42,0.08,0.34,'#c0392b'); },
+  waystone(g,T){ sp_shadow(g,T,0.5,0.24);
+    sp_poly(g,T,[[0.36,0.88],[0.32,0.34],[0.5,0.16],[0.67,0.34],[0.64,0.88]],'#9a9488');
+    sp_poly(g,T,[[0.5,0.16],[0.67,0.34],[0.64,0.88],[0.52,0.88]],'rgba(0,0,0,0.15)',true);
+    g.strokeStyle='rgba(120,210,255,0.95)'; g.lineWidth=Math.max(1.5,T*0.045); g.beginPath(); g.moveTo(0.44*T,0.42*T); g.lineTo(0.52*T,0.52*T); g.lineTo(0.44*T,0.62*T); g.moveTo(0.52*T,0.52*T); g.lineTo(0.56*T,0.7*T); g.stroke(); },
+  pyramid(g,T){ sp_shadow(g,T,0.5,0.48);
+    const L=[[0.04,0.72,0.92],[0.14,0.56,0.72],[0.24,0.4,0.52],[0.34,0.24,0.32],[0.44,0.1,0.12]];
+    L.forEach(([x,y,w],i)=>{ sp_rect(g,T,x,y,w,(i===0?0.16:0.16),'#d9b871'); sp_rect(g,T,x+w*0.55,y,w*0.45,0.16,'rgba(0,0,0,0.16)',true); });
+    sp_rect(g,T,0.45,0.74,0.1,0.14,'#3a2a14'); },
+  altar(g,T){ sp_shadow(g,T,0.5,0.4);
+    g.fillStyle='rgba(180,110,255,0.35)'; g.beginPath(); g.arc(0.5*T,0.3*T,0.24*T,0,Math.PI*2); g.fill();
+    sp_rect(g,T,0.3,0.56,0.4,0.3,'#9a9488'); sp_rect(g,T,0.16,0.46,0.68,0.12,'#b3ad9f');
+    [0.24,0.76].forEach(x=>{ sp_rect(g,T,x-0.025,0.34,0.05,0.12,'#f4ead0'); g.fillStyle='#ffb347'; g.beginPath(); g.ellipse(x*T,0.31*T,0.025*T,0.05*T,0,0,Math.PI*2); g.fill(); });
+    g.fillStyle='#d9a3ff'; g.beginPath(); g.moveTo(0.5*T,0.16*T); g.lineTo(0.58*T,0.3*T); g.lineTo(0.5*T,0.44*T); g.lineTo(0.42*T,0.3*T); g.closePath(); g.fill(); g.stroke(); },
+  ship(g,T){ g.fillStyle='rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(0.5*T,0.84*T,0.4*T,0.08*T,0,0,Math.PI*2); g.fill();
+    sp_poly(g,T,[[0.08,0.62],[0.92,0.62],[0.78,0.84],[0.22,0.84]],'#8b5a2b'); sp_rect(g,T,0.08,0.62,0.84,0.05,'#6b4423');
+    g.beginPath(); g.moveTo(0.5*T,0.62*T); g.lineTo(0.5*T,0.06*T); g.stroke();
+    g.fillStyle='#f4eedf'; g.beginPath(); g.moveTo(0.52*T,0.1*T); g.quadraticCurveTo(0.86*T,0.32*T,0.52*T,0.56*T); g.closePath(); g.fill(); g.stroke();
+    g.beginPath(); g.moveTo(0.48*T,0.16*T); g.quadraticCurveTo(0.2*T,0.36*T,0.48*T,0.54*T); g.closePath(); g.fill(); g.stroke();
+    sp_poly(g,T,[[0.5,0.06],[0.66,0.1],[0.5,0.14]],'#3f7fd0'); },
+  qspot(g,T){ g.fillStyle='#6b4a2a'; g.beginPath(); g.ellipse(0.5*T,0.72*T,0.3*T,0.12*T,0,0,Math.PI*2); g.fill();
+    g.strokeStyle='#d33a2c'; g.lineWidth=Math.max(2,T*0.08); g.beginPath(); g.moveTo(0.34*T,0.58*T); g.lineTo(0.66*T,0.86*T); g.moveTo(0.66*T,0.58*T); g.lineTo(0.34*T,0.86*T); g.stroke(); },
+};
+function objectAt(r,c,skipHero){
+  const isHero=r===hero.row&&c===hero.col;
+  if(!isExplored(r,c)&&!isHero) return null;
+  if(isHero&&!skipHero) return onShip?{k:'ship'}:{k:'token',x:heroEmoji()+'|#4d84c4'};
+  if(shipPos&&!onShip&&r===shipPos.r&&c===shipPos.c) return {k:'ship'};
+  if(sorcerer&&sorcerer.active&&r===sorcerer.r&&c===sorcerer.c) return {k:'token',x:'🌑|#6b35a8'};
+  const p=poiAt(r,c); if(!p) return null;
+  if(p.type==='qspot'&&p.hidden) return null;
+  switch(p.type){
+    case 'city': return {k:(CITY1&&r===CITY1.r&&c===CITY1.c)?'capital':'city'};
+    case 'castle': return {k:'castle',x:p.owner==='player'?'own':(p.wallHp<=0?'ruin':'enemy')};
+    case 'governor': return {k:'castle',x:p.owner==='player'?'own':'gov'};
+    case 'port': case 'cave': case 'camp': case 'chest': case 'scroll': case 'waystone': case 'pyramid': case 'altar': case 'qspot': return {k:p.type};
+    case 'wizard': return {k:'token',x:p.emoji+'|#3f7fbf'};
+    case 'lair': return {k:'token',x:p.emoji+'|'+(p.roaming?'#c0463f':'#9a7a3a')};
+    default: return {k:'token',x:(p.emoji||'?')+'|#888888'};
+  }
+}
+function drawObject(g,o,x,y,T,dpr){ g.drawImage(sprite(o.k,T,dpr,o.x),x,y-T*(SPR_H-1),T,T*SPR_H); }
+
 function drawIcon(g,icon,x,y,T){
   g.fillStyle='rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(x+T/2,y+T*0.82,T*0.3,T*0.1,0,0,Math.PI*2); g.fill();
   // Chrome применяет прозрачность кисти даже к цветным эмодзи — значок рисуем непрозрачной кистью
@@ -2351,11 +2748,29 @@ function mapCanvasEl(W,H,dpr){
   if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){ cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr); cv.style.width=W+'px'; cv.style.height=H+'px'; }
   return cv;
 }
+/* Вода оживает: готовый кадр карты хранится во внеэкранном холсте, а поверх него ~7 раз в секунду
+   рисуются мерцающие блики на свободных водных клетках. Полная перерисовка — только при изменениях. */
+let mapBase=null, waterSpots=[];
+function blitMapFrame(t){
+  const cv=document.querySelector('#map canvas'); if(!cv||!mapBase) return;
+  const T=TILE_PX, dpr=Math.min(3,window.devicePixelRatio||1), g=cv.getContext('2d');
+  g.setTransform(1,0,0,1,0,0); g.drawImage(mapBase,0,0);
+  g.setTransform(dpr,0,0,dpr,0,0); g.strokeStyle='#ffffff'; g.lineWidth=Math.max(1,T*0.035);
+  waterSpots.forEach(w=>{ for(let i=0;i<2;i++){ const a=Math.sin(t/800+w.ph+i*2.1); if(a<=0) continue;
+    g.globalAlpha=a*0.45; const x=w.x+T*(0.2+0.5*((w.ph*7+i*0.37)%1)), y=w.y+T*(0.25+0.45*((w.ph*3+i*0.61)%1)), l=T*(0.1+a*0.08);
+    g.beginPath(); g.moveTo(x-l,y); g.quadraticCurveTo(x,y-T*0.05,x+l,y); g.stroke(); } });
+  g.globalAlpha=1;
+}
+setInterval(()=>{ if(booted&&view==='map'&&gfxMode==='new'&&!walkAnim&&document.visibilityState==='visible'&&waterSpots.length) blitMapFrame(performance.now()); },140);
 function drawMapCanvas(dist,camRow,camCol){
   if(walkAnim) return; // идёт шаг — кадры рисует анимация
   const T=TILE_PX, W=VIEW_COLS*T, H=VIEW_ROWS*T, dpr=Math.min(3,window.devicePixelRatio||1);
   const cv=mapCanvasEl(W,H,dpr); ensureGfxCache(T,dpr);
-  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  if(!mapBase||mapBase.width!==cv.width||mapBase.height!==cv.height){ mapBase=document.createElement('canvas'); mapBase.width=cv.width; mapBase.height=cv.height; }
+  const g=mapBase.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  waterSpots=[];
+  for(let rr=0;rr<VIEW_ROWS;rr++) for(let cc=0;cc<VIEW_COLS;cc++){ const r=camRow+rr, c=camCol+cc;
+    if(terrAt(r,c)==='w'&&isExplored(r,c)&&!objectAt(r,c)&&dist[key(r,c)]===undefined) waterSpots.push({x:cc*T,y:rr*T,ph:hrand(r,c,123)*6.28}); }
   drawWorld(g,T,dpr,camRow,camCol,VIEW_ROWS,VIEW_COLS,{hero:true});
   // сетка, подсветка
   g.strokeStyle='rgba(0,0,0,0.07)'; g.lineWidth=1; g.beginPath();
@@ -2364,12 +2779,13 @@ function drawMapCanvas(dist,camRow,camCol){
     const r=camRow+rr, c=camCol+cc, x=cc*T, y=rr*T, t=terrAt(r,c);
     const reach=dist[key(r,c)]!==undefined && !(r===hero.row&&c===hero.col);
     const canModify=!reach && adjacent(r,c) && (t==='f'||t==='w'||t==='m');
-    if(!reach&&!canModify) continue;
+    if((!reach&&!canModify)||!isExplored(r,c)) continue;
     g.fillStyle=reach?'rgba(170,255,150,0.10)':'rgba(255,210,80,0.12)'; g.fillRect(x+1,y+1,T-2,T-2);
     g.strokeStyle=reach?'rgba(190,255,170,0.5)':'rgba(255,205,70,0.9)'; g.lineWidth=Math.max(1.2,T*(reach?0.04:0.055));
     const i=g.lineWidth/2+1; g.strokeRect(x+i,y+i,T-2*i,T-2*i);
   }
   drawAtmosphere(g,W,H);
+  blitMapFrame(performance.now());
 }
 
 /* ---------- анимация шага ---------- */
@@ -2403,7 +2819,7 @@ function walkFrame(now){
   const fs=Math.round(T*0.64); g.textAlign='center'; g.textBaseline='middle'; g.font=`${fs}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
   const onWater=terrAt(Math.round(hr),Math.round(hc))==='w';
   const bob=onWater?Math.sin(prog*Math.PI*2)*T*0.025:-Math.abs(Math.sin(f*Math.PI))*T*0.08;
-  drawIcon(g,onWater?'⛵':heroEmoji(),(hc-camC)*T,(hr-camR)*T+bob,T);
+  drawObject(g,onWater?{k:'ship'}:{k:'token',x:heroEmoji()+'|#4d84c4'},(hc-camC)*T,(hr-camR)*T+bob,T,screenDpr);
   drawAtmosphere(g,W,H);
   if(prog>=a.path.length-1){ walkAnim=null; const done=a.done; renderMap(); done(); return; }
   requestAnimationFrame(walkFrame);
@@ -2540,6 +2956,8 @@ function openJournal(tab){
     <button class="secondary" style="margin-top:12px;width:100%;" onclick="closeModal()">Закрыть</button>`);
 }
 document.getElementById('journalBtn').onclick=()=>{ closeModal(); openJournal(); };
+document.getElementById('questLogBtn').onclick=()=>{ closeModal(); openQuestLog(); };
+document.getElementById('pathBtn').onclick=()=>{ closeModal(); openPieces(false); };
 function bugReportText(){
   const tg=window.Telegram&&window.Telegram.WebApp;
   const plat=tg&&tg.initData?`Telegram ${tg.platform||'?'} (API ${tg.version||'?'})`:navigator.userAgent.slice(0,120);
@@ -2579,10 +2997,11 @@ document.getElementById('bugBtn').onclick=()=>{ closeModal(); openBugReport(); }
    одновременно видна одна (остальные ждут в очереди). Что уже показано, хранится отдельно от партии:
    новая игра не повторяет подсказок. Выключить и показать заново — в меню. */
 const TIPS={
-  move:'Нажмите на клетку в <b>зелёной рамке</b> — туда герой дойдёт сегодня. На день есть ограниченное число ходов (👣), болото и пустыня отнимают больше.',
+  move:'Нажмите на клетку в <b>зелёной рамке</b> — туда герой дойдёт сегодня. На день есть ограниченное число ходов (👣). Тёмное вокруг — <b>неразведанные земли</b>: они открываются по мере пути.',
+  quest:'Город даёт <b>поручение</b>: охота на логово, письмо в другой город или поиск клада. Цель отмечается ❗ на карте, список — в меню ☰ → «Поручения».',
   day:'Ходы на сегодня кончились — нажмите <b>⏭️ День</b>. Каждое утро игра сохраняется сама.',
   workers:'Лес, скалы и воду убирают <b>работники</b>: 🪓 Лесоруб, ⛏️ Камнетёс, 🔨 Плотник. Нанимают их в гильдиях некоторых городов.',
-  city:'В городе можно <b>нанять войска</b>. Размер армии ограничен <b>лидерством</b> 👥. В разных городах продаётся разное — всё увиденное записывается в 📖 Справочник (меню ☰).',
+  city:'В городе можно <b>нанять войска</b> и взять <b>поручение</b>. Размер армии ограничен <b>лидерством</b> 👥. В разных городах продаётся разное — всё увиденное записывается в 📖 Справочник (меню ☰).',
   battle:'<b>Бой.</b> Отряд, чей ход, подсвечен. Нажмите на клетку, чтобы пойти, или на врага в красной рамке, чтобы ударить. Стрелки бьют издалека. Можно «Ждать» или «Отступить».',
   defeat:'Поражение: армия отступила в столицу и ослабла. В обычном режиме неудачу можно переиграть — меню ☰ → «Загрузить».',
   week:'Прошла неделя: города и ваши замки приносят <b>доход</b>, а армия требует <b>содержания</b>. Следите, чтобы казна не опустела.',
@@ -2625,8 +3044,8 @@ document.getElementById('tipsResetBtn').onclick=()=>{ tipsSeen={}; tipsOn=true; 
 function checkVisibleTips(){
   if(!tipsOn||view!=='map') return;
   const inView=(r,c)=>r>=camRowG&&r<camRowG+VIEW_ROWS&&c>=camColG&&c<camColG+VIEW_COLS;
-  if(!tipsSeen.castle && pois.some(p=>(p.type==='castle'||p.type==='governor')&&p.owner!=='player'&&inView(p.r,p.c))) showTip('castle');
-  if(!tipsSeen.sorcerer && sorcerer&&sorcerer.active&&inView(sorcerer.r,sorcerer.c)) showTip('sorcerer');
+  if(!tipsSeen.castle && pois.some(p=>(p.type==='castle'||p.type==='governor')&&p.owner!=='player'&&inView(p.r,p.c)&&isExplored(p.r,p.c))) showTip('castle');
+  if(!tipsSeen.sorcerer && sorcerer&&sorcerer.active&&inView(sorcerer.r,sorcerer.c)&&isExplored(sorcerer.r,sorcerer.c)) showTip('sorcerer');
 }
 
 /* ================= МИНИ-КАРТА =================
@@ -2637,16 +3056,18 @@ function openMinimap(){
   const P=pal(), sc=6, cv=document.createElement('canvas'); cv.width=COLS*sc; cv.height=ROWS*sc; cv.id='miniCanvas';
   const g=cv.getContext('2d');
   const col={g:P.grass[0],d:P.sand[0],s:P.swamp[0],w:P.water[0],f:P.tree[1],m:P.peak[1],r:P.road[0]};
-  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ g.fillStyle=col[terrainGrid[r][c]]||P.grass[0]; g.fillRect(c*sc,r*sc,sc,sc); }
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ g.fillStyle=isExplored(r,c)?(col[terrainGrid[r][c]]||P.grass[0]):'#100d0a'; g.fillRect(c*sc,r*sc,sc,sc); }
   g.strokeStyle='rgba(255,255,255,0.9)'; g.lineWidth=2; g.strokeRect(camColG*sc+1,camRowG*sc+1,VIEW_COLS*sc-2,VIEW_ROWS*sc-2);
   const dot=(r,c,fill,size)=>{ const z=size*sc; g.fillStyle='rgba(0,0,0,0.6)'; g.fillRect(c*sc+sc/2-z/2-1,r*sc+sc/2-z/2-1,z+2,z+2); g.fillStyle=fill; g.fillRect(c*sc+sc/2-z/2,r*sc+sc/2-z/2,z,z); };
   pois.forEach(p=>{
+    if(!isExplored(p.r,p.c)) return;
     if(p.type==='city') dot(p.r,p.c,'#ffd34d',1.6);
     else if(p.type==='castle'||p.type==='governor') dot(p.r,p.c,p.owner==='player'?'#4da3ff':'#e5484d',1.6);
     else if(p.type==='port') dot(p.r,p.c,'#7fe0ff',1.2);
     else if(p.type==='pyramid'&&poiAt(p.r,p.c)) dot(p.r,p.c,'#d9a3ff',1.3);
   });
   if(shipPos&&!onShip) dot(shipPos.r,shipPos.c,'#ffffff',1.1);
+  activeQuests().filter(q=>q.cont===curCont).forEach(q=>{ const t=questTargetPos(q); if(!t) return; g.strokeStyle='#ffd34d'; g.lineWidth=2.5; g.beginPath(); g.arc(t.c*sc+sc/2,t.r*sc+sc/2,sc*2.2,0,Math.PI*2); g.stroke(); });
   g.fillStyle='#ffffff'; g.beginPath(); g.arc(hero.col*sc+sc/2,hero.row*sc+sc/2,sc*1.3,0,Math.PI*2); g.fill();
   g.fillStyle='#1b140d'; g.beginPath(); g.arc(hero.col*sc+sc/2,hero.row*sc+sc/2,sc*0.6,0,Math.PI*2); g.fill();
   const enemyCastles=pois.filter(p=>(p.type==='castle'||p.type==='governor')&&p.owner!=='player').length;
@@ -2655,12 +3076,149 @@ function openMinimap(){
     <div id="miniSlot"></div>
     <div class="miniLegend"><span><i style="background:#ffffff"></i>вы</span><span><i style="background:#ffd34d"></i>город</span>
       <span><i style="background:#e5484d"></i>вражеский замок</span><span><i style="background:#4da3ff"></i>ваш замок</span>
-      <span><i style="background:#7fe0ff"></i>пристань</span><span><i style="background:#d9a3ff"></i>пирамида</span><span>⬜ рамка — экран</span></div>
-    <button class="secondary" style="margin-top:12px;width:100%;" onclick="closeModal()">Закрыть</button>`);
+      <span><i style="background:#7fe0ff"></i>пристань</span><span><i style="background:#d9a3ff"></i>пирамида</span><span>🟡 кольцо — цель поручения</span><span>⬜ рамка — экран</span></div>
+    <button style="margin-top:12px;width:100%;" onclick="closeModal();openPieces(false)">🧩 Карта пути (${mapPieces}/${TOTAL_PIECES})</button>
+    <button class="secondary" style="margin-top:8px;width:100%;" onclick="closeModal()">Закрыть</button>`);
   document.getElementById('miniSlot').appendChild(cv);
   track('minimap',{});
 }
 document.getElementById('miniBtn').onclick=openMinimap;
+
+/* ================= ПОРУЧЕНИЯ ГОРОДОВ =================
+   В каждом городе — одно поручение за раз: охота (разбить логово), письмо (доставить в другой город земли),
+   клад (найти тайник ❓). Награда выдаётся сразу по выполнении. Одновременно не больше 3 активных.
+   После выполнения город даёт новое поручение через 2 дня. Цели отмечены ❗ на карте и кольцом на мини-карте. */
+const MAX_QUESTS=3;
+function activeQuests(){ return allPois().filter(p=>p.type==='city'&&p.quest&&p.quest.status==='active').map(p=>p.quest); }
+function questTargetPos(q){
+  if(q.type==='hunt'||q.type==='treasure') return {r:q.tr,c:q.tc};
+  if(q.type==='courier'){ const w=worlds[q.cont]; const d=w&&(w===worlds[curCont]?pois:w.pois).find(p=>p.type==='city'&&p.name===q.dest); return d?{r:d.r,c:d.c}:null; }
+  return null;
+}
+function questTargetAt(r,c){ return activeQuests().some(q=>{ if(q.cont!==curCont) return false; const t=questTargetPos(q); return t&&t.r===r&&t.c===c; }); }
+function drawQuestBadge(g,x,y,T){
+  const cx=x+T*0.8, cy=y+T*0.18, rr=Math.max(5,T*0.17);
+  g.fillStyle='#ffd34d'; g.beginPath(); g.arc(cx,cy,rr,0,Math.PI*2); g.fill(); g.strokeStyle='#3a2a10'; g.lineWidth=1.5; g.stroke();
+  g.fillStyle='#3a2a10'; g.font=`bold ${Math.round(rr*1.4)}px sans-serif`; g.textAlign='center'; g.textBaseline='middle'; g.fillText('!',cx,cy+0.5);
+}
+function makeQuest(city){
+  const lairs=pois.filter(p=>p.type==='lair'&&poiAt(p.r,p.c)===p&&!activeQuests().some(q=>q.type==='hunt'&&q.cont===curCont&&q.tr===p.r&&q.tc===p.c));
+  const others=pois.filter(p=>p.type==='city'&&p!==city);
+  const types=[]; if(lairs.length) types.push('hunt','hunt'); if(others.length) types.push('courier'); types.push('treasure');
+  const type=types[Math.floor(Math.random()*types.length)];
+  if(type==='hunt'){
+    lairs.sort((a,b)=>chebyshev(a,city)-chebyshev(b,city)); const t=lairs[Math.floor(Math.random()*Math.min(4,lairs.length))];
+    const pow=power(t.enemies,false);
+    return {type,cont:curCont,city:city.name,tr:t.r,tc:t.c,target:t.name,gold:Math.round(pow*0.9+60),exp:Math.round(pow/4)+15,
+      text:`Разбейте «${t.name}» — они разоряют окрестности ${city.name}.`};
+  }
+  if(type==='courier'){
+    const d=others[Math.floor(Math.random()*others.length)], far=chebyshev(d,city);
+    return {type,cont:curCont,city:city.name,dest:d.name,gold:Math.round((40+far*3)*goldMult()),exp:20,
+      text:`Доставьте письмо градоначальнику в город ${d.name}.`};
+  }
+  // клад: проходимая пустая клетка в 10–25 клетках от города
+  let spot=null;
+  for(let i=0;i<300&&!spot;i++){ const r=city.r+Math.round((Math.random()-0.5)*50), c=city.c+Math.round((Math.random()-0.5)*50);
+    if(r<2||c<2||r>=ROWS-2||c>=COLS-2) continue; const d=chebyshev({r,c},city); if(d<10||d>25) continue;
+    if(['g','d','s','r'].includes(terrainGrid[r][c])&&!pois.some(q=>q.r===r&&q.c===c)) spot={r,c}; }
+  if(!spot) return null;
+  pois.push({r:spot.r,c:spot.c,type:'qspot',name:'Тайник',emoji:'❓',questCity:city.name,hidden:true});
+  return {type:'treasure',cont:curCont,city:city.name,tr:spot.r,tc:spot.c,gold:Math.round((120+Math.random()*120)*goldMult()),exp:25,item:Math.random()<0.3,
+    text:`По старой карте горожан где-то неподалёку зарыт клад. Отыщите тайник ❓.`};
+}
+function cityQuestHtml(p){
+  if(p.type!=='city') return '';
+  if((!p.quest||p.quest.status==='done') && (p.questReady||0)<=day){ const q=makeQuest(p); if(q){ q.status='offered'; p.quest=q; } }
+  const q=p.quest;
+  let body='';
+  if(!q||q.status==='done') body=`<div class="armyline">Новых поручений пока нет — загляните через ${Math.max(1,(p.questReady||0)-day)} дн.</div>`;
+  else if(q.status==='offered'){
+    const full=activeQuests().length>=MAX_QUESTS;
+    body=`<div class="armyline" style="color:var(--text)">${q.text}</div><div class="armyline">Награда: ${q.gold}💰, ${q.exp} опыта${q.item?', возможно — снаряжение':''}</div>
+      ${full?`<div class="armyline" style="color:var(--bad)">У вас уже ${MAX_QUESTS} поручения — сначала выполните одно.</div>`:`<button onclick="acceptQuest()">Взяться</button>`}`;
+  } else body=`<div class="armyline" style="color:var(--text)">${q.text}</div><div class="armyline" style="color:var(--accent)">Выполняется — цель отмечена ❗ на карте и кольцом на мини-карте 🧭.</div>`;
+  return `<div class="cityCard"><h2>📜 Поручение</h2>${body}</div>`;
+}
+function acceptQuest(){
+  const p=curCity; if(!p||!p.quest||p.quest.status!=='offered'||activeQuests().length>=MAX_QUESTS) return;
+  p.quest.status='active';
+  if(p.quest.type==='treasure'){ const s=pois.find(x=>x.type==='qspot'&&x.r===p.quest.tr&&x.c===p.quest.tc); if(s) s.hidden=false; }
+  const t=questTargetPos(p.quest); if(t) revealAround(t.r,t.c,2);
+  track('quest_accept',{type:p.quest.type}); renderCity('📜 Поручение принято.');
+}
+function completeQuest(q,where){
+  const city=allPois().find(p=>p.type==='city'&&p.quest===q); if(!city) return '';
+  q.status='done'; city.questReady=day+2;
+  gold+=q.gold; heroExp+=q.exp; let extra='';
+  if(q.item){ const lo=Math.max(1,contTier()), hi=Math.min(5,contTier()+1);
+    const pool=Object.keys(ITEMS).filter(id=>ITEMS[id].tier>=lo&&ITEMS[id].tier<=hi&&!inventory.includes(id)&&!Object.values(equipment).includes(id));
+    if(pool.length){ const id=pool[Math.floor(Math.random()*pool.length)]; inventory.push(id); extra=` и ${ITEMS[id].emoji} ${ITEMS[id].name}`; } }
+  checkLevelUp(); updateHud(); stats.questsDone=(stats.questsDone||0)+1; track('quest_done',{type:q.type});
+  return `📜 Поручение города ${q.city} выполнено${where?' — '+where:''}! +${q.gold}💰, +${q.exp} опыта${extra}.`;
+}
+function questOnLairCleared(lair){
+  const q=activeQuests().find(q=>q.type==='hunt'&&q.cont===curCont&&q.tr===lair.r&&q.tc===lair.c);
+  return q?completeQuest(q,`«${lair.name}» больше не опасны`):'';
+}
+function openQuestLog(){
+  const qs=activeQuests();
+  const list=qs.length?qs.map(q=>`<div class="row" style="display:block;"><b>${CONTINENTS[q.cont].emoji} ${q.city}</b><div class="armyline">${q.text}</div><div class="armyline">Награда: ${q.gold}💰, ${q.exp} опыта</div></div>`).join(''):'<div class="armyline">Активных поручений нет. Их дают в городах.</div>';
+  openModal(`<h2>📜 Поручения (${qs.length}/${MAX_QUESTS})</h2>${list}<button class="secondary" style="margin-top:12px;width:100%;" onclick="closeModal()">Закрыть</button>`);
+}
+
+/* ================= КАРТА ПУТИ (части карты) =================
+   Части карты складываются в картинку: следующая земля в виде старинной карты с маршрутом от края к её пристани.
+   Каждый захваченный замок открывает одну часть (порядок частей у каждой земли свой), последнюю хранит Хозяин Земли.
+   Когда собраны все 8 — путь открыт. Для этого следующую землю генерируем заранее, не трогая текущую. */
+function ensureWorldPreview(i){
+  if(worlds[i]) return worlds[i];
+  stashWorld();
+  const w=generateWorld(i); worlds[i]=w;
+  const c=worlds[curCont]; ({terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState}=c); fog=c.fog||null;
+  return w;
+}
+function pieceOrder(){ const rng=mulberry32(worldSeed+curCont*31+7); const a=[...Array(TOTAL_PIECES).keys()]; for(let i=a.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function openPieces(justGot){
+  if(view==='battle') return;
+  const isLast=curCont>=CONTINENTS.length-1, target=isLast?curCont:curCont+1;
+  const w=isLast?(stashWorld(),worlds[curCont]):ensureWorldPreview(target);
+  const PC=4, PR=TOTAL_PIECES/PC, W=360, H=270, sc=W/COLS, cv=document.createElement('canvas'); cv.width=W*2; cv.height=H*2; cv.style.width='100%'; cv.style.borderRadius='8px';
+  const g=cv.getContext('2d'); g.scale(2,2);
+  const sep={w:'#7d8a86',g:'#d6c393',d:'#e6d4a3',s:'#b7a67a',f:'#9c8a5c',m:'#8f7d61',r:'#c4a776'};
+  g.fillStyle='#e9d9ae'; g.fillRect(0,0,W,H);
+  const grid=w.terrainGrid;
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ g.fillStyle=sep[grid[r][c]]||sep.g; g.fillRect(c*sc,r*(H/ROWS),sc+0.6,H/ROWS+0.6); }
+  // старение: пятна и рамка
+  const rng=mulberry32(target*99+3); for(let i=0;i<40;i++){ g.fillStyle=`rgba(120,90,50,${0.04+rng()*0.06})`; g.beginPath(); g.arc(rng()*W,rng()*H,4+rng()*18,0,Math.PI*2); g.fill(); }
+  (w.pois||[]).forEach(p=>{ const x=p.c*sc, y=p.r*(H/ROWS);
+    if(p.type==='city'){ g.fillStyle='#5a3a1a'; g.fillRect(x-2.5,y-2.5,5,5); }
+    if(p.type==='castle'||p.type==='governor'){ g.fillStyle='#8a2a1a'; g.beginPath(); g.moveTo(x,y-4); g.lineTo(x+4,y+3); g.lineTo(x-4,y+3); g.closePath(); g.fill(); } });
+  if(!isLast&&w.arrival){ const ax=w.arrival.c*sc, ay=w.arrival.r*(H/ROWS);
+    g.strokeStyle='#a3271d'; g.lineWidth=2; g.setLineDash([6,5]); g.beginPath(); g.moveTo(0,H*0.85); g.quadraticCurveTo(W*0.25,H*0.95,ax,ay); g.stroke(); g.setLineDash([]);
+    g.lineWidth=3; g.beginPath(); g.moveTo(ax-6,ay-6); g.lineTo(ax+6,ay+6); g.moveTo(ax+6,ay-6); g.lineTo(ax-6,ay+6); g.stroke(); }
+  g.fillStyle='#5a3a1a'; g.font='bold 15px Georgia,serif'; g.textAlign='center'; g.fillText(CONTINENTS[target].name,W/2,20);
+  // части
+  const order=pieceOrder(), got=Math.min(TOTAL_PIECES,mapPieces), open=new Set(order.slice(0,got)), fresh=justGot&&got>0?order[got-1]:-1;
+  const pw=W/PC, ph=H/PR;
+  for(let i=0;i<TOTAL_PIECES;i++){ const x=(i%PC)*pw, y=Math.floor(i/PC)*ph;
+    if(!open.has(i)){ g.fillStyle='#3b2e20'; g.fillRect(x,y,pw,ph); g.fillStyle='rgba(255,230,180,0.35)'; g.font='bold 30px Georgia,serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillText('?',x+pw/2,y+ph/2); g.textBaseline='alphabetic'; } }
+  // швы-пазлы
+  g.strokeStyle='rgba(60,40,20,0.75)'; g.lineWidth=1.5;
+  // вертикальные швы: выступ вправо или влево; горизонтальные — вверх или вниз
+  for(let cIdx=1;cIdx<PC;cIdx++){ const x=cIdx*pw; for(let rIdx=0;rIdx<PR;rIdx++){ const y0=rIdx*ph, R=0.12*ph, left=(cIdx+rIdx)%2===0;
+    g.beginPath(); g.moveTo(x,y0); g.lineTo(x,y0+ph/2-R); g.arc(x,y0+ph/2,R,-Math.PI/2,Math.PI/2,left); g.lineTo(x,y0+ph); g.stroke(); } }
+  for(let rIdx=1;rIdx<PR;rIdx++){ const y=rIdx*ph; for(let cIdx=0;cIdx<PC;cIdx++){ const x0=cIdx*pw, R=0.12*pw, down=cIdx%2===0;
+    g.beginPath(); g.moveTo(x0,y); g.lineTo(x0+pw/2-R,y); g.arc(x0+pw/2,y,R,Math.PI,0,down); g.lineTo(x0+pw,y); g.stroke(); } }
+  if(fresh>=0){ const x=(fresh%PC)*pw, y=Math.floor(fresh/PC)*ph; g.strokeStyle='#ffd34d'; g.lineWidth=4; g.strokeRect(x+2,y+2,pw-4,ph-4); }
+  g.strokeStyle='#5a3a1a'; g.lineWidth=3; g.strokeRect(1.5,1.5,W-3,H-3);
+  const title=isLast?`🗺️ Карта земли ${CONTINENTS[curCont].emoji} ${CONTINENTS[curCont].name}`:`🗺️ Карта пути в ${CONTINENTS[target].emoji} ${CONTINENTS[target].name}`;
+  const note=got>=TOTAL_PIECES?(isLast?'Карта собрана — земля покорена.':'<b>Путь открыт!</b> Отплывайте из любой пристани (нужен корабль).')
+    :`Собрано <b>${got}/${TOTAL_PIECES}</b>. Каждый захваченный замок открывает часть карты, последнюю хранит Хозяин Земли.`;
+  openModal(`<h2>${justGot?'🧩 Найдена часть карты!':title}</h2>${justGot?`<div class="modalNote">${title}</div>`:''}<div class="modalNote">${note}</div>
+    <div id="pieceSlot" style="margin-top:8px;"></div><button class="secondary" style="margin-top:12px;width:100%;" onclick="closeModal()">Закрыть</button>`);
+  document.getElementById('pieceSlot').appendChild(cv);
+}
 
 const GAME_INTRO=`Пять земель по 80×60 клеток, каждая опаснее предыдущей. В каждой — 5 городов и 8 замков: покорите землю целиком, чтобы открыть путь к следующей. Между землями плавают из любой пристани — корабль плывёт с вами.`;
 let pendingHero='knight';
@@ -2768,7 +3326,7 @@ function serializeGame(){
   stashWorld(); tickPlaytime();
   return JSON.stringify({
     v:SAVE_VERSION, savedAt:Date.now(), worldSeed, curCont, unlocked,
-    worlds:worlds.map(w=>w?{terrain:rleEncode(w.terrainGrid),pois:w.pois,sorcerer:w.sorcerer,CITY1:w.CITY1,visited:w.visited,
+    worlds:worlds.map(w=>w?{terrain:rleEncode(w.terrainGrid),fog:fogEncode(w.fog),pois:w.pois,sorcerer:w.sorcerer,CITY1:w.CITY1,visited:w.visited,
       mapPieces:w.mapPieces,landComplete:w.landComplete,questState:w.questState,arrival:w.arrival}:null),
     hero, gold, day, week, movesLeft, hasShip, onShip, shipPos, lastWaterPos, bonusLeadership,
     heroLevel, heroExp, heroMagicPower, quasiExpireWeek, quasiBonus,
@@ -2780,7 +3338,7 @@ function restoreGame(json){
   let d; try{ d=JSON.parse(json); }catch(e){ return false; }
   if(!d || d.v!==SAVE_VERSION || !Array.isArray(d.worlds) || !d.worlds[d.curCont]) return false;
   worldSeed=d.worldSeed; unlocked=d.unlocked;
-  worlds=d.worlds.map(w=>w?{terrainGrid:rleDecode(w.terrain),pois:w.pois,sorcerer:w.sorcerer,CITY1:w.CITY1,visited:w.visited||{},
+  worlds=d.worlds.map(w=>w?{terrainGrid:rleDecode(w.terrain),fog:fogDecode(w.fog),pois:w.pois,sorcerer:w.sorcerer,CITY1:w.CITY1,visited:w.visited||{},
     mapPieces:w.mapPieces,landComplete:w.landComplete,questState:w.questState,arrival:w.arrival}:null);
   curCont=d.curCont;
   // старые сохранения: у городов ещё нет ассортимента — раздаём его (детерминированно от сида и номера земли)
@@ -2789,7 +3347,7 @@ function restoreGame(json){
   if(Array.isArray(d.inventory)) d.inventory=d.inventory.filter(id=>ITEMS[id]);
   if(d.equipment) Object.keys(d.equipment).forEach(sl=>{ if(d.equipment[sl]&&!ITEMS[d.equipment[sl]]) d.equipment[sl]=null; });
   // подключаем текущую землю напрямую (без stashWorld — иначе затрём загруженное пустыми глобалами)
-  ({terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState}=worlds[curCont]);
+  ({terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState}=worlds[curCont]); fog=worlds[curCont].fog||null;
   ({hero,gold,day,week,movesLeft,hasShip,onShip,shipPos,lastWaterPos,bonusLeadership,heroLevel,heroExp,heroMagicPower,
     quasiExpireWeek,quasiBonus,equipment,inventory,army,spellCharges,workers,hardMode,gameOverPermanent,ritualItems,governorWage}=d);
   gameOverReason=d.gameOverReason||'';
@@ -2940,6 +3498,7 @@ function openStats(victory){
         ${cell(fmtNum(S.unitsRecruited),'воинов нанято')}
         ${cell(S.spellsCast,'заклинаний сотворено')}
         ${cell(S.chestsOpened,'сундуков открыто')}
+        ${cell(S.questsDone||0,'поручений выполнено')}
         ${cell(S.scrollsRead,'свитков прочитано')}
         ${cell(fmtNum(S.goldEarned),'золота добыто')}
         ${cell(fmtNum(S.goldSpent),'золота потрачено')}
