@@ -12,11 +12,7 @@
     --text:#f1e6cf; --muted:#b8a984; --good:#5fae5f; --bad:#b34848; --player:#4d84c4; --enemy:#b34848;
     box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
   }
-  @media (prefers-color-scheme: light){
-    :root:not([data-theme="dark"]){
-      --bg:#f4ecd8; --panel:#fff8ea; --panel2:#eee2c6; --accent:#a5750f; --text:#2b2015; --muted:#6b5c3e;
-    }
-  }
+  /* игра всегда в тёмном «деревянном» оформлении — светлая тема телефона его не меняет */
   html{scroll-padding-top:env(safe-area-inset-top,0px); height:100%;}
   *{box-sizing:border-box;}
   body{margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family:'Georgia',ui-serif,serif;
@@ -57,6 +53,7 @@
   #tipBox .tipBody{flex:1;}
   #tipBox button{margin-top:8px; padding:5px 12px; font-size:12.5px;}
   body.land #tipBox{left:auto; right:calc(12px + env(safe-area-inset-right,0px)); transform:none; bottom:calc(12px + env(safe-area-inset-bottom,0px)); width:var(--side,260px);}
+
   #miniCanvas{width:100%; height:auto; border-radius:8px; border:1px solid var(--accent); image-rendering:pixelated; display:block; margin-top:8px;}
   .miniLegend{display:flex; flex-wrap:wrap; gap:6px 12px; font-size:12px; color:var(--muted); margin-top:8px;}
   .miniLegend i{display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:4px; vertical-align:-1px; border:1px solid rgba(0,0,0,.5);}
@@ -136,6 +133,29 @@
   .rowbtns{display:flex; gap:4px;}
   .rowbtns button{padding:4px 8px; font-size:12px;}
   .armyline{font-size:12.5px; color:var(--muted); margin-top:4px;}
+
+  /* ---- оформление в стиле карты: тёмное дерево, пергамент, золотая кайма ---- */
+  .cityCard{position:relative; background:
+      radial-gradient(120% 80% at 50% 0%, rgba(255,220,150,0.07), rgba(0,0,0,0) 60%),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.012) 0 3px, rgba(0,0,0,0.03) 3px 7px),
+      linear-gradient(180deg, #33261a, #241a11) !important;
+    border:1px solid #7a5a22 !important; box-shadow:inset 0 0 0 1px rgba(255,215,120,0.12), inset 0 0 24px rgba(0,0,0,0.45), 0 3px 10px rgba(0,0,0,0.35);
+    border-radius:12px !important;}
+  .cityCard h2{display:flex; align-items:center; gap:8px; color:#e9c46a !important; text-shadow:0 1px 0 rgba(0,0,0,0.6);}
+  .cityCard h2::after{content:''; flex:1; height:1px; background:linear-gradient(90deg, rgba(233,196,106,0.6), rgba(233,196,106,0)); margin-left:6px;}
+  .cityCard .row{border-color:rgba(233,196,106,0.16) !important;}
+  button{background:linear-gradient(180deg,#f0cf72,#c99a2e); color:#2a1b08; border:1px solid #7a5a22; box-shadow:inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 0 rgba(0,0,0,0.35);
+    font-weight:bold; text-shadow:0 1px 0 rgba(255,255,255,0.25);}
+  button:active:not(:disabled){transform:translateY(1px); box-shadow:inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 0 rgba(0,0,0,0.35);}
+  button.secondary{background:linear-gradient(180deg,#3a2b1d,#2a1f15); color:#f1e6cf; border:1px solid #8a6a2a; text-shadow:none; font-weight:normal;
+    box-shadow:inset 0 1px 0 rgba(255,220,150,0.12), 0 2px 0 rgba(0,0,0,0.35);}
+  #hud,#info,#modalCard,#tipBox,#turnbar,#log{background:linear-gradient(180deg,#30241a,#221910) !important; border-color:#7a5a22 !important;
+    box-shadow:inset 0 0 0 1px rgba(255,215,120,0.10), 0 3px 10px rgba(0,0,0,0.3);}
+  .uimg{width:34px; height:44px; vertical-align:middle; margin:-8px 4px -6px -4px; image-rendering:auto;}
+  .cityBanner{display:block; width:100%; height:auto; border-radius:8px; border:1px solid #7a5a22; margin:2px 0 8px;}
+  .legendGrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 10px; margin-top:8px;}
+  .legendGrid div{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text);}
+  .legendGrid img{width:34px; height:44px;}
 </style>
 </head>
 <body>
@@ -215,7 +235,6 @@
     <button id="pathBtn" class="secondary">🧩 Карта пути</button>
     <button id="journalBtn" class="secondary">📖 Справочник городов</button>
     <button id="legendBtn" class="secondary">🗺️ Легенда карты</button>
-    <button id="gfxBtn" class="secondary">🎨 Графика: новая</button>
     <button id="tipsBtn" class="secondary">💡 Подсказки: вкл</button>
     <button id="tipsResetBtn" class="secondary">💡 Показать подсказки заново</button>
     <button id="restartBtn" class="secondary">🔄 Новая игра</button>
@@ -226,7 +245,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.16.0', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.18.0', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -888,7 +907,7 @@ const HERO_CLASSES={
     desc:'Маг. +5 к магической силе — заклинания дешевле и доступнее раньше; с собой Исцеление и Огненный шар. С каждым уровнем — ещё +1 маг. сила.',
     start(){ heroMagicPower+=5; spellCharges.heal=(spellCharges.heal||0)+1; spellCharges.fireball=(spellCharges.fireball||0)+1; }},
   ranger:{name:'Ярен',title:'следопыт',emoji:'🧝',bonus:{movesPerDay:2,goldPerWeek:15},lvlLead:0,lvlMagic:0,
-    desc:'Путешественник. +2 хода в день, +1 к дальности обзора и +15💰 в неделю; с собой лишние Лесоруб и Камнетёс.',
+    desc:'Путешественник. +2 хода в день, +1 к дальности обзора и +15💰 в неделю; с собой лишние Лесоруб и Камнетёс. Каждые 3 уровня — ещё +1 ход в день.',
     start(){ workers.lumberjack+=1; workers.stonemason+=1; }},
   classic:{name:'Герой',title:'странник',emoji:'🧝',bonus:{},lvlLead:0,lvlMagic:0,desc:''},
 };
@@ -900,7 +919,9 @@ function applyHeroClass(cls){
   const h=heroCls(); if(h.start) h.start();
   movesLeft=MOVE_BUDGET+equipBonus('movesPerDay');
 }
-function equipBonus(field){ return SLOTS.reduce((s,slot)=>{ const id=equipment[slot]; if(!id) return s; return s+(ITEMS[id].bonus[field]||0); },0)+(heroCls().bonus[field]||0); }
+// следопыт: каждые 3 уровня героя — ещё +1 ход в день
+function heroLevelBonus(field){ return (heroClass==='ranger'&&field==='movesPerDay')?Math.floor(heroLevel/3):0; }
+function equipBonus(field){ return SLOTS.reduce((s,slot)=>{ const id=equipment[slot]; if(!id) return s; return s+(ITEMS[id].bonus[field]||0); },0)+(heroCls().bonus[field]||0)+heroLevelBonus(field); }
 function key(r,c){ return r+','+c; }
 function poiAt(r,c){
   return pois.find(p=>{
@@ -1342,14 +1363,18 @@ function handleAltarQuest(p){
   const lairDone=visited[key(lair.r,lair.c)+':lair']===true;
   if(questState==='available'){
     setInfo(`📜 <b>${p.name}</b>: дух хранителя просит уничтожить Драконье гнездо и вернуться.<br>Награда: 200💰 + 15 к лидерству навсегда.<br>
-      <button onclick="acceptQuest()">Принять</button>
+      <button onclick="acceptAltarQuest()">Принять</button>
       <button class="secondary" onclick="setInfo('Отказано.')">Отказаться</button>`);
   } else if(questState==='active'){
     if(lairDone) setInfo(`📜 Драконье гнездо уничтожено! <button onclick="claimQuestReward()">Забрать награду</button>`);
     else setInfo(`📜 Квест активен — найдите и уничтожьте Драконье гнездо.`);
   } else setInfo(`📜 «Благодарю за помощь, искатель приключений».`);
 }
-function acceptQuest(){ questState='active'; setInfo('Квест принят: уничтожьте Драконье гнездо.'); }
+function acceptAltarQuest(){
+  questState='active';
+  const lair=questLair(); if(lair) revealAround(lair.r,lair.c,2); // показать, где гнездо
+  setInfo('📜 Квест принят: уничтожьте Драконье гнездо — оно отмечено ❗ на карте и кольцом на мини-карте 🧭.'); renderMap();
+}
 function claimQuestReward(){
   questState='completed'; gold+=200; bonusLeadership+=15; updateHud();
   setInfo('🎁 Награда получена: +200💰 и +15 к лидерству навсегда!');
@@ -1626,7 +1651,7 @@ function renderCity(msg){
   updateHud(); saveSoon();
   const armyLine=army.filter(a=>a.hp>0).map(a=>`${UNITS[a.key].emoji}${UNITS[a.key].name}×${Math.ceil(a.hp/UNITS[a.key].hp)}`).join(', ')||'нет отрядов';
   const sh=p.shop||{spells:[],items:[],workers:[]};
-  let html=`<div class="cityCard"><h2>${p.emoji} ${p.name}</h2>${p.shop?`<div class="armyline" style="color:var(--accent);">${p.shop.title}</div>`:''}<div class="armyline">Ваша армия: ${armyLine}</div>
+  let html=`<div class="cityCard"><img class="cityBanner" alt="" src="${cityBannerURL(p)}"><h2>${p.name}</h2>${p.shop?`<div class="armyline" style="color:var(--accent);">${p.shop.title}</div>`:''}<div class="armyline">Ваша армия: ${armyLine}</div>
     ${msg?`<div class="armyline" style="color:var(--good);margin-top:6px;">${msg}</div>`:''}</div>`;
   html+=cityQuestHtml(p);
   const minimal=p.isCave||p.isCamp;
@@ -1636,7 +1661,7 @@ function renderCity(msg){
   p.recruit.forEach(r=>{
     const u=UNITS[r.key];
     const out=r.stock<=0;
-    html+=`<div class="row"><span>${u.emoji} ${u.name} — ${r.cost}💰/шт (в запасе: ${r.stock}/${r.maxStock})<br><span style="color:var(--muted)">лид. ${u.leadershipCost}, содержание ${u.upkeep}💰/нед</span></span>
+    html+=`<div class="row"><span>${unitImg(r.key)}${u.name} — ${r.cost}💰/шт (в запасе: ${r.stock}/${r.maxStock})<br><span style="color:var(--muted)">лид. ${u.leadershipCost}, содержание ${u.upkeep}💰/нед</span></span>
       <span class="rowbtns"><button onclick="recruitUnit(${p.r},${p.c},'${r.key}',1)" ${out?'disabled':''}>+1</button><button onclick="recruitUnit(${p.r},${p.c},'${r.key}',5)" ${out?'disabled':''}>+5</button></span></div>`;
   });
   html+=`</div>`;
@@ -1654,7 +1679,7 @@ function renderCity(msg){
     if(owned.length===0) html+=`<div class="armyline">Нечего продавать.</div>`;
     owned.forEach(a=>{
       const u=UNITS[a.key], sp=sellPrice(a.key), cnt=Math.ceil(a.hp/u.hp);
-      html+=`<div class="row"><span>${u.emoji} ${u.name} ×${cnt} — ${sp}💰/шт</span>
+      html+=`<div class="row"><span>${unitImg(a.key)}${u.name} ×${cnt} — ${sp}💰/шт</span>
         <span class="rowbtns"><button class="secondary" onclick="sellUnit('${a.id}',1)">-1</button><button class="secondary" onclick="sellUnit('${a.id}',5)">-5</button></span></div>`;
     });
     html+=`</div>`;
@@ -1720,7 +1745,7 @@ function openArmyView(){ if(view==='battle') return; showView('army'); renderArm
 function renderArmyStackRow(a){
   const u=UNITS[a.key], cnt=Math.ceil(a.hp/u.hp);
   const targetZone=a.zone==='active'?'резерв':'актив';
-  return `<div class="row" style="flex-wrap:wrap;"><span>${u.emoji} <b>${u.name}</b> ×${cnt} (hp ${a.hp}/${a.max}, лид. ${cnt*u.leadershipCost})</span>
+  return `<div class="row" style="flex-wrap:wrap;"><span>${unitImg(a.key)}<b>${u.name}</b> ×${cnt} (hp ${a.hp}/${a.max}, лид. ${cnt*u.leadershipCost})</span>
       <span class="rowbtns"><button class="secondary" onclick="switchZone('${a.id}')">→ ${targetZone}</button></span></div>
       <div class="row" style="padding-top:0;">
         <span style="font-size:12px;color:var(--muted);">Разделить: <input type="number" id="split_${a.id}" min="1" max="${cnt-1||0}" value="1" style="width:48px;"> шт</span>
@@ -1800,7 +1825,8 @@ function checkLevelUp(){
   while(heroExp>=expForNext()){ heroExp-=expForNext(); heroLevel++;
     const h=heroCls(), dl=5+(h.lvlLead||0), dm=1+(h.lvlMagic||0);
     bonusLeadership+=dl; heroMagicPower+=dm;
-    bLog && bLog(`🌟 Новый уровень! ${h.name} ${heroLevel} ур. (+${dl} к лидерству, +${dm} к магической силе).`);
+    const rangerMove=heroClass==='ranger'&&heroLevel%3===0?', +1 ход в день':'';
+    bLog && bLog(`🌟 Новый уровень! ${h.name} ${heroLevel} ур. (+${dl} к лидерству, +${dm} к магической силе${rangerMove}).`);
   }
 }
 function onVictory(){
@@ -1879,22 +1905,23 @@ function onDefeat(){
   hero={row:CITY1.r,col:CITY1.c}; movesLeft=MOVE_BUDGET+equipBonus('movesPerDay');
   setTimeout(()=>{ showView('map'); renderMap(); setInfo('💀 Поражение! Отряд отступил домой и частично восстановлен.'); },1300);
 }
-function doAttack(att,def){
+function doAttack(att,def,fxDelay){
   const au=bUnit(att), du=bUnit(def), cnt=bCount(att);
   const roll=Math.floor(Math.random()*(au.dmg[1]-au.dmg[0]+1))+au.dmg[0] + (att.side==='player'?equipBonus('dmg'):0);
   const defVal=du.def + (def.side==='player'?equipBonus('def'):0) + (def.side==='enemy'?currentWallBonus:0);
   let dmg=Math.round(cnt*roll*(1-Math.min(0.7,defVal*0.05))); dmg=Math.max(cnt,dmg);
+  const isShot=au.ranged&&dist(att,def)>1, cover=isShot&&shotCovered(att,def);
+  if(cover){ dmg=Math.max(1,Math.round(dmg*0.7)); fxPush({type:'float',r:def.row,c:def.col,text:'🛡 укрытие',color:'#cfd8e0',dur:1100,delay:(fxDelay||0)+150}); }
   def.hp-=dmg;
-  const isShot=au.ranged&&dist(att,def)>1;
-  fxAttack(att,def,dmg,isShot,0);
-  bLog(`${au.emoji} «${au.name}» бьёт: -${dmg} «${du.name}»`);
+  fxAttack(att,def,dmg,isShot,fxDelay||0);
+  bLog(`${au.emoji} «${au.name}» бьёт: -${dmg} «${du.name}»${cover?' (укрытие −30%)':''}`);
   if(def.hp<=0){ def.hp=0; bLog(`☠️ «${du.name}» уничтожены!`); }
   else if(!au.ranged){
     const dCnt=bCount(def), rroll=Math.floor(Math.random()*(du.dmg[1]-du.dmg[0]+1))+du.dmg[0] + (def.side==='player'?equipBonus('dmg'):0);
     const atkDefVal=au.def + (att.side==='player'?equipBonus('def'):0);
     let rdmg=Math.round(dCnt*rroll*(1-Math.min(0.7,atkDefVal*0.05))*0.7); rdmg=Math.max(1,rdmg);
     att.hp-=rdmg;
-    fxAttack(def,att,rdmg,false,380);
+    fxAttack(def,att,rdmg,false,(fxDelay||0)+380);
     bLog(`${du.emoji} «${du.name}» отвечает: -${rdmg} «${au.name}»`);
     if(att.hp<=0){ att.hp=0; bLog(`☠️ «${au.name}» уничтожены!`); }
   }
@@ -1909,9 +1936,16 @@ function aiAct(stack){
   const targets=stacks.filter(s=>s.side==='player'&&s.hp>0);
   if(targets.length===0){ checkBattleEnd(); renderBattle(); return; }
   targets.sort((a,b)=>dist(stack,a)-dist(stack,b));
-  const target=targets[0], d=dist(stack,target);
-  if(d<=1) doAttack(stack,target);
-  else{
+  const u=bUnit(stack);
+  // 1) вплотную — бьёт; 2) стрелок — стреляет в ближайшего; 3) можно подойти и ударить — подходит и бьёт (ближайшую доступную цель)
+  if(dist(stack,targets[0])<=1){ doAttack(stack,targets[0]); renderBattle(); bEndTurn(); return; }
+  if(u.ranged){ doAttack(stack,targets[0]); renderBattle(); bEndTurn(); return; }
+  for(const t of targets){ const ap=bApproachCell(stack,t);
+    if(ap){ stack.row=ap.row; stack.col=ap.col; bLog(`${u.emoji} «${u.name}» подходит и атакует`); doAttack(stack,t,230); renderBattle(); bEndTurn(); return; } }
+  // 4) иначе — идёт к ближайшей цели на всю дальность хода
+  const target=targets[0];
+  for(let step=0;step<bMoveRange(stack)&&dist(stack,target)>1;step++){
+    const r0=stack.row, c0=stack.col;
     const dr=Math.sign(target.row-stack.row), dc=Math.sign(target.col-stack.col);
     const nr=stack.row+dr, nc=stack.col+dc;
     if(!bOccupied(nr,nc)&&nr>=0&&nr<BF_ROWS&&nc>=0&&nc<BF_COLS){ stack.row=nr; stack.col=nc; }
@@ -1923,11 +1957,29 @@ function aiAct(stack){
         if((a||b)&&rr>=0&&rr<BF_ROWS&&cc>=0&&cc<BF_COLS&&!bOccupied(rr,cc)){ const d=dist({row:rr,col:cc},target); if(d<=cur&&(!best||d<best.d)) best={rr,cc,d}; } }
       if(best){ stack.row=best.rr; stack.col=best.cc; }
     }
-    bLog(`${bUnit(stack).emoji} «${bUnit(stack).name}» двигается`);
+    if(stack.row===r0&&stack.col===c0) break; // упёрся
   }
+  bLog(`${u.emoji} «${u.name}» двигается`);
   renderBattle(); bEndTurn();
 }
 function dist(a,b){ return Math.max(Math.abs(a.row-b.row),Math.abs(a.col-b.col)); }
+/* Дальность хода отряда: половина скорости, не меньше 1. */
+function bMoveRange(stack){ return Math.max(1,Math.round(bUnit(stack).speed/2)); }
+/* Клетка, с которой отряд может ударить цель в этот же ход: свободна, рядом с целью и в пределах хода.
+   Из подходящих — ближайшая к отряду (меньше шагов), при равенстве — ближайшая к прямой линии. */
+function bApproachCell(stack,target){
+  const mr=bMoveRange(stack); let best=null;
+  for(let a=-1;a<=1;a++) for(let b=-1;b<=1;b++){
+    if(!a&&!b) continue; const r=target.row+a, c=target.col+b;
+    if(r<0||r>=BF_ROWS||c<0||c>=BF_COLS||bOccupied(r,c)) continue;
+    const d=dist(stack,{row:r,col:c}); if(d>mr) continue;
+    const tie=Math.abs(r-stack.row)+Math.abs(c-stack.col);
+    if(!best||d<best.d||(d===best.d&&tie<best.tie)) best={row:r,col:c,d,tie};
+  }
+  return best;
+}
+/* Может ли отряд атаковать цель в этот ход: стрелок — всегда, вплотную — да, иначе — если есть клетка подхода. */
+function bCanStrike(stack,target){ return bUnit(stack).ranged||dist(stack,target)<=1||!!bApproachCell(stack,target); }
 function cellClick(r,c){
   if(battleOver||view!=='battle') return;
   const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
@@ -1935,7 +1987,10 @@ function cellClick(r,c){
   const u=bUnit(cur), target=stacks.find(s=>s.hp>0&&s.row===r&&s.col===c);
   if(target && target.side==='enemy'){
     const d=dist(cur,target);
-    if(u.ranged||d<=1){ doAttack(cur,target); renderBattle(); bEndTurn(); }
+    if(u.ranged||d<=1){ doAttack(cur,target); renderBattle(); bEndTurn(); return; }
+    // подойти и ударить за один ход
+    const ap=bApproachCell(cur,target);
+    if(ap){ cur.row=ap.row; cur.col=ap.col; bLog(`${u.emoji} «${u.name}» подходит и атакует`); doAttack(cur,target,230); renderBattle(); bEndTurn(); }
     return;
   }
   if(!target){
@@ -2022,6 +2077,13 @@ function genObstacles(scene){
   return out;
 }
 function isObst(r,c){ return bObst.some(o=>o.r===r&&o.c===c); }
+/* Линия выстрела проходит через препятствие? Отрезок между центрами клеток проверяется с мелким шагом. */
+function shotCovered(att,def){
+  const n=24;
+  for(let i=1;i<n;i++){ const t=i/n, r=Math.round(att.row+(def.row-att.row)*t), c=Math.round(att.col+(def.col-att.col)*t);
+    if((r===att.row&&c===att.col)||(r===def.row&&c===def.col)) continue; if(isObst(r,c)) return true; }
+  return false;
+}
 function bSlotRows(n){ return Array.from({length:n},(_,i)=>Math.max(0,Math.min(BF_ROWS-1,Math.round((i+0.5)*BF_ROWS/n-0.5)))); }
 /* Сцена боя: грунт и окружение по местности вокруг героя, стена — если это штурм. */
 function makeBattleScene(enc){
@@ -2165,12 +2227,16 @@ function drawBattleCanvas(now){
     g.strokeStyle='rgba(255,255,255,0.45)'; g.lineWidth=Math.max(1,cell*0.025); g.stroke();
     if(cur&&s.id===cur.id&&!battleOver){ const pulse=0.5+0.5*Math.sin(now/220); g.strokeStyle=`rgba(255,215,80,${0.55+0.45*pulse})`; g.lineWidth=Math.max(2,cell*0.05);
       g.beginPath(); g.ellipse(cx,cy+cell*0.24,cell*0.42,cell*0.17,0,0,Math.PI*2); g.stroke(); active=true; }
-    if(myTurn&&s.side==='enemy'&&s.hp>0&&(bUnit(cur).ranged||dist(cur,s)<=1)){ g.strokeStyle='rgba(255,90,80,0.95)'; g.lineWidth=Math.max(2,cell*0.05);
+    if(myTurn&&s.side==='enemy'&&s.hp>0&&bUnit(cur).ranged&&dist(cur,s)>1&&shotCovered(cur,s)){
+      g.textAlign='center'; g.textBaseline='middle'; g.font=`${Math.round(cell*0.26)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; g.fillStyle='#000'; g.fillText('🛡️',cx-cell*0.32,cy-cell*0.3); }
+    if(myTurn&&s.side==='enemy'&&s.hp>0&&bCanStrike(cur,s)){ g.strokeStyle='rgba(255,90,80,0.95)'; g.lineWidth=Math.max(2,cell*0.05);
       g.setLineDash([cell*0.08,cell*0.06]); g.beginPath(); g.ellipse(cx,cy+cell*0.24,cell*0.44,cell*0.18,0,0,Math.PI*2); g.stroke(); g.setLineDash([]); }
     // вспышка попадания
     const hit=bfx.find(f=>f.type==='hit'&&f.id===s.id&&now>=f.t0&&now-f.t0<f.dur);
-    g.textAlign='center'; g.textBaseline='middle'; g.font=`${fs}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
-    g.fillStyle='#000'; g.fillText(u.emoji,cx,cy-cell*0.04);
+    // фигура: ноги на подставке (локальная «земля» спрайта — 0.78 клетки + запас сверху), враги смотрят влево
+    const fig=sprite('fig',cell*1.2,dpr,s.key+'|'+(s.side==='enemy'?1:0)), cs=Math.round(cell*1.2);
+    g.drawImage(fig,cx-cs/2,cy+cell*0.24-cs*(0.78+SPR_H-1),cs,cs*SPR_H);
+    g.textAlign='center'; g.textBaseline='middle';
     if(hit){ g.fillStyle=`rgba(255,60,40,${0.45*(1-(now-hit.t0)/hit.dur)})`; g.beginPath(); g.arc(cx,cy-cell*0.04,cell*0.33,0,Math.PI*2); g.fill(); }
     // число бойцов
     const n=String(bCount(s)), pw=Math.max(cell*0.3,cell*0.13*n.length+cell*0.12), ph=cell*0.24, px=cx+cell*0.42-pw, py=cy+cell*0.12;
@@ -2297,18 +2363,7 @@ function renderMap(){
   camRowG=camRow; camColG=camCol;
   const mapEl=document.getElementById('map');
   setTimeout(checkVisibleTips,0);
-  if(gfxMode==='new'){ mapEl.classList.add('gfx'); drawMapCanvas(dist,camRow,camCol); updateHud(); return; }
-  mapEl.classList.remove('gfx');
-  for(let rr=0;rr<VIEW_ROWS;rr++) for(let cc=0;cc<VIEW_COLS;cc++){
-    const r=camRow+rr, c=camCol+cc;
-    const t=TERRAIN[tch(r,c)];
-    const reach=dist[key(r,c)]!==undefined && !(r===hero.row&&c===hero.col);
-    const canModify=!reach && adjacent(r,c) && (tch(r,c)==='f'||tch(r,c)==='w'||tch(r,c)==='m');
-    const ex=isExplored(r,c);
-    html+=`<div class="tile${reach&&ex?' reachable':''}${canModify&&ex?' modifiable':''}" style="background:${ex?t.color:'#0e0c0a'}" onclick="tileClick(${r},${c})"><span class="icon">${tileIcon(r,c)}</span></div>`;
-  }
-  mapEl.innerHTML=html;
-  updateHud();
+  mapEl.classList.add('gfx'); drawMapCanvas(dist,camRow,camCol); updateHud();
 }
 
 /* ================= GRAPHICS: CANVAS MAP =================
@@ -2324,8 +2379,7 @@ function renderMap(){
    7) значки, подсветка ходов, виньетка и тон земли.
    Анимация: герой идёт по своему пути клетка за клеткой, камера плавно следует. Статичный мир на время шага
    рисуется один раз во внеэкранный холст, в кадрах — только сдвиг и герой. */
-let gfxMode=(()=>{ try{ return localStorage.getItem('morveyn_gfx')||'new'; }catch(e){ return 'new'; } })();
-function setGfxMode(m){ gfxMode=m; try{ localStorage.setItem('morveyn_gfx',m); }catch(e){} renderMap(); }
+const gfxMode='new'; // классический режим (цветные квадраты) удалён в 0.18.0
 const PALETTES=[
   {grass:['#5b8c3b','#4b7a30','#6f9f49'],sand:['#d8c08a','#c4a96f'],swamp:['#4d5a35','#3a4a3a'],rock:['#77695a','#5d5246','#9a8c7a'],
    water:['#2c6b90','#3f88ae'],beach:'#d9c590',tree:['#1f4a26','#2c6431','#3d823e'],peak:['#6c6052','#a1937f',null],road:['#b39463','#6e5638'],
@@ -2609,15 +2663,16 @@ function drawCliff(g,o,T,P){
    цветная подставка с кольцом и значком. Спрайт выше клетки (SPR_H), чтобы башни и крыши выступали над ней.
    Кешируются по размеру клетки и земле. */
 const SPR_H=1.3;
-let sprCache={key:'',m:{}};
+let sprCaches={};
 function sprite(kind,T,dpr,extra){
-  const ck=T+'|'+dpr+'|'+curCont; if(sprCache.key!==ck) sprCache={key:ck,m:{}};
-  const k=kind+'|'+(extra||''); if(sprCache.m[k]) return sprCache.m[k];
+  T=Math.round(T); const ck=T+'|'+dpr+'|'+curCont;
+  if(!sprCaches[ck]){ const keys=Object.keys(sprCaches); if(keys.length>=4) delete sprCaches[keys[0]]; sprCaches[ck]={}; }
+  const cache=sprCaches[ck], k=kind+'|'+(extra||''); if(cache[k]) return cache[k];
   const cv=document.createElement('canvas'); cv.width=Math.ceil(T*dpr); cv.height=Math.ceil(T*SPR_H*dpr);
   const g=cv.getContext('2d'); g.scale(dpr,dpr); g.translate(0,T*(SPR_H-1));
   g.lineJoin='round'; g.lineCap='round'; g.strokeStyle='rgba(32,22,12,0.9)'; g.lineWidth=Math.max(1,T*0.035);
   (SPRITES[kind]||SPRITES.token)(g,T,extra||'');
-  sprCache.m[k]=cv; return cv;
+  cache[k]=cv; return cv;
 }
 function sp_poly(g,T,pts,fill,noStroke){ g.beginPath(); pts.forEach(([x,y],i)=>i?g.lineTo(x*T,y*T):g.moveTo(x*T,y*T)); g.closePath(); g.fillStyle=fill; g.fill(); if(!noStroke) g.stroke(); }
 function sp_rect(g,T,x,y,w,h,fill,noStroke){ g.fillStyle=fill; g.fillRect(x*T,y*T,w*T,h*T); if(!noStroke) g.strokeRect(x*T,y*T,w*T,h*T); }
@@ -2708,12 +2763,195 @@ const SPRITES={
   qspot(g,T){ g.fillStyle='#6b4a2a'; g.beginPath(); g.ellipse(0.5*T,0.72*T,0.3*T,0.12*T,0,0,Math.PI*2); g.fill();
     g.strokeStyle='#d33a2c'; g.lineWidth=Math.max(2,T*0.08); g.beginPath(); g.moveTo(0.34*T,0.58*T); g.lineTo(0.66*T,0.86*T); g.moveTo(0.66*T,0.58*T); g.lineTo(0.34*T,0.86*T); g.stroke(); },
 };
+/* ================= РИСУНКИ ВОЙСК =================
+   Все войска, герои и персонажи рисуются кодом в стиле построек: контур, 2–3 тона, взгляд вправо.
+   hum() — человекоподобная фигура (тело, голова, головной убор, оружие, щит, плащ), quad() — четвероногое,
+   особые существа — отдельными функциями. Координаты: x — доля клетки от центра, y — вверх от земли (0.78 клетки). */
+function ART_ctx(g,T,s,ox,oy){ const cx=0.5+(ox||0), fy=0.78-(oy||0); return {u:x=>(cx+x*s)*T, v:y=>(fy-y*s)*T, s}; }
+function a_poly(g,pts,fill){ g.beginPath(); pts.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.closePath(); g.fillStyle=fill; g.fill(); g.stroke(); }
+function a_ell(g,x,y,rx,ry,fill,noStroke){ g.beginPath(); g.ellipse(x,y,Math.max(0.5,rx),Math.max(0.5,ry),0,0,Math.PI*2); g.fillStyle=fill; g.fill(); if(!noStroke) g.stroke(); }
+function a_line(g,x1,y1,x2,y2,col,w){ g.save(); g.strokeStyle=col; g.lineWidth=w; g.beginPath(); g.moveTo(x1,y1); g.lineTo(x2,y2); g.stroke(); g.restore(); }
+function hum(g,T,o){
+  const {u,v,s}=ART_ctx(g,T,o.s||1,o.ox,o.oy), k=T*s, lw=g.lineWidth;
+  const skin=o.skin||'#f0c9a0', tunic=o.tunic||'#a33', legs=o.legs||'#5a4632';
+  if(o.cloak) a_poly(g,[[u(-0.13),v(0.47)],[u(0.13),v(0.47)],[u(0.19),v(0.06)],[u(-0.19),v(0.06)]],o.cloak);
+  if(o.robe){ a_poly(g,[[u(-0.12),v(0.47)],[u(0.12),v(0.47)],[u(0.18),v(0.0)],[u(-0.18),v(0.0)]],tunic); }
+  else {
+    a_poly(g,[[u(-0.1),v(0.22)],[u(-0.02),v(0.22)],[u(-0.03),v(0.0)],[u(-0.11),v(0.0)]],legs);
+    a_poly(g,[[u(0.02),v(0.22)],[u(0.1),v(0.22)],[u(0.11),v(0.0)],[u(0.03),v(0.0)]],legs);
+    a_poly(g,[[u(-0.12),v(0.06)],[u(-0.02),v(0.06)],[u(-0.02),v(0.0)],[u(-0.13),v(0.0)]],'#3a2a1c');
+    a_poly(g,[[u(0.02),v(0.06)],[u(0.12),v(0.06)],[u(0.13),v(0.0)],[u(0.02),v(0.0)]],'#3a2a1c');
+    a_poly(g,[[u(-0.12),v(0.47)],[u(0.12),v(0.47)],[u(0.15),v(0.18)],[u(-0.15),v(0.18)]],tunic);
+  }
+  g.fillStyle='rgba(0,0,0,0.16)'; g.beginPath(); g.moveTo(u(0.03),v(0.47)); g.lineTo(u(0.12),v(0.47)); g.lineTo(u(o.robe?0.18:0.15),v(o.robe?0:0.18)); g.lineTo(u(0.04),v(o.robe?0:0.18)); g.closePath(); g.fill();
+  if(o.belt!==false&&!o.robe) a_poly(g,[[u(-0.14),v(0.27)],[u(0.14),v(0.27)],[u(0.145),v(0.23)],[u(-0.145),v(0.23)]],o.beltCol||'#4a3020');
+  if(o.chest) o.chest(u,v,k);
+  // руки
+  const arm=o.arm||tunic;
+  a_poly(g,[[u(-0.12),v(0.46)],[u(-0.18),v(0.44)],[u(-0.2),v(0.24)],[u(-0.14),v(0.24)]],arm);
+  a_poly(g,[[u(0.12),v(0.46)],[u(0.18),v(0.44)],[u(0.2),v(0.24)],[u(0.14),v(0.24)]],arm);
+  a_ell(g,u(-0.17),v(0.23),0.035*k,0.035*k,o.hand||skin); a_ell(g,u(0.17),v(0.23),0.035*k,0.035*k,o.hand||skin);
+  // голова
+  if(o.hairBack) a_ell(g,u(-0.01),v(0.55),0.105*k,0.11*k,o.hairBack);
+  a_ell(g,u(0),v(0.56),0.09*k,0.095*k,skin);
+  if(o.ears){ a_poly(g,[[u(-0.08),v(0.57)],[u(-0.15),v(0.64)],[u(-0.07),v(0.53)]],skin); a_poly(g,[[u(0.08),v(0.57)],[u(0.15),v(0.64)],[u(0.07),v(0.53)]],skin); }
+  const eye=o.eyes||'#1b120a';
+  if(o.oneEye){ a_ell(g,u(0.02),v(0.57),0.035*k,0.035*k,'#fff'); a_ell(g,u(0.03),v(0.57),0.016*k,0.016*k,eye,true); }
+  else { a_ell(g,u(0.0),v(0.57),0.012*k,0.016*k,eye,true); a_ell(g,u(0.05),v(0.57),0.012*k,0.016*k,eye,true); }
+  if(o.tusks){ g.save(); g.fillStyle='#f4ecd8'; [[0.0],[0.05]].forEach(([x])=>{ g.beginPath(); g.moveTo(u(x-0.01),v(0.5)); g.lineTo(u(x),v(0.54)); g.lineTo(u(x+0.01),v(0.5)); g.closePath(); g.fill(); }); g.restore(); }
+  if(o.beard) a_poly(g,[[u(-0.06),v(0.52)],[u(0.08),v(0.52)],[u(0.04),v(0.42)],[u(-0.02),v(0.42)]],o.beard);
+  // головной убор
+  const h=o.head;
+  if(h==='helm'){ a_poly(g,[[u(-0.1),v(0.56)],[u(-0.09),v(0.64)],[u(0),v(0.68)],[u(0.09),v(0.64)],[u(0.1),v(0.56)]],o.helmCol||'#9aa0a8'); a_line(g,u(0.03),v(0.6),u(0.03),v(0.5),'rgba(40,40,50,0.9)',Math.max(1,k*0.02)); }
+  if(h==='greathelm'){ a_poly(g,[[u(-0.1),v(0.48)],[u(-0.1),v(0.64)],[u(0),v(0.69)],[u(0.1),v(0.64)],[u(0.1),v(0.48)]],o.helmCol||'#b8bec6'); a_line(g,u(-0.02),v(0.58),u(0.1),v(0.58),'#2a2a30',Math.max(1,k*0.025)); if(o.plume) a_poly(g,[[u(0),v(0.68)],[u(-0.05),v(0.8)],[u(-0.12),v(0.74)],[u(-0.04),v(0.66)]],o.plume); }
+  if(h==='hood'){ a_poly(g,[[u(-0.11),v(0.48)],[u(-0.1),v(0.62)],[u(0.01),v(0.71)],[u(0.11),v(0.6)],[u(0.08),v(0.62)],[u(0.0),v(0.64)],[u(-0.06),v(0.55)],[u(-0.05),v(0.48)]],o.hoodCol||'#3d6b35'); }
+  if(h==='wizard'){ a_poly(g,[[u(-0.14),v(0.62)],[u(0.15),v(0.62)],[u(0.06),v(0.66)],[u(0.02),v(0.88)],[u(-0.05),v(0.66)]],o.hatCol||'#2f4f9a'); }
+  if(h==='crown'){ a_poly(g,[[u(-0.08),v(0.62)],[u(-0.09),v(0.7)],[u(-0.04),v(0.66)],[u(0),v(0.72)],[u(0.04),v(0.66)],[u(0.09),v(0.7)],[u(0.08),v(0.62)]],o.crownCol||'#e3b23c'); }
+  if(h==='horns'){ a_poly(g,[[u(-0.06),v(0.63)],[u(-0.14),v(0.74)],[u(-0.03),v(0.66)]],'#e8dcc8'); a_poly(g,[[u(0.06),v(0.63)],[u(0.14),v(0.74)],[u(0.03),v(0.66)]],'#e8dcc8'); }
+  if(h==='hair') a_poly(g,[[u(-0.09),v(0.56)],[u(-0.08),v(0.64)],[u(0.02),v(0.67)],[u(0.09),v(0.63)],[u(0.09),v(0.59)],[u(0.0),v(0.62)]],o.hairCol||'#2a1a10');
+  // щит
+  if(o.shield){ a_poly(g,[[u(-0.27),v(0.4)],[u(-0.12),v(0.4)],[u(-0.12),v(0.24)],[u(-0.195),v(0.14)],[u(-0.27),v(0.24)]],o.shield);
+    if(o.shieldMark) a_line(g,u(-0.195),v(0.37),u(-0.195),v(0.2),o.shieldMark,Math.max(1,k*0.03)); }
+  // оружие в правой руке
+  const W=o.weapon, hx=u(0.17), hy=v(0.23), mw=Math.max(1.2,k*0.03);
+  if(W==='sword'){ a_poly(g,[[hx-0.018*k,hy],[hx+0.018*k,hy],[hx+0.018*k,hy-0.32*k],[hx,hy-0.36*k],[hx-0.018*k,hy-0.32*k]],'#dfe4ea'); a_line(g,hx-0.05*k,hy-0.01*k,hx+0.05*k,hy-0.01*k,'#7a5a2a',mw*1.4); }
+  if(W==='spear'){ a_line(g,hx,v(0.0),hx,v(0.78),'#7a5a2a',mw*1.2); a_poly(g,[[hx-0.03*k,v(0.76)],[hx,v(0.88)],[hx+0.03*k,v(0.76)]],'#dfe4ea'); }
+  if(W==='staff'){ a_line(g,hx,v(0.0),hx,v(0.66),'#6b4423',mw*1.2); a_ell(g,hx,v(0.7),0.045*k,0.045*k,o.orb||'#7fd6ff'); g.save(); g.fillStyle=o.orbGlow||'rgba(127,214,255,0.35)'; g.beginPath(); g.arc(hx,v(0.7),0.09*k,0,Math.PI*2); g.fill(); g.restore(); }
+  if(W==='bow'){ g.save(); g.strokeStyle='#7a4a1f'; g.lineWidth=mw*1.3; g.beginPath(); g.arc(hx-0.02*k,hy-0.12*k,0.2*k,-1.25,1.25); g.stroke(); g.strokeStyle='#eee'; g.lineWidth=1; g.beginPath(); g.moveTo(hx-0.02*k+0.2*k*Math.cos(-1.25),hy-0.12*k+0.2*k*Math.sin(-1.25)); g.lineTo(hx-0.02*k+0.2*k*Math.cos(1.25),hy-0.12*k+0.2*k*Math.sin(1.25)); g.stroke(); g.restore(); }
+  if(W==='axe'){ a_line(g,hx,hy+0.04*k,hx,hy-0.36*k,'#6b4423',mw*1.3); a_poly(g,[[hx,hy-0.34*k],[hx+0.12*k,hy-0.4*k],[hx+0.13*k,hy-0.22*k],[hx,hy-0.26*k]],'#c9ced4'); }
+  if(W==='club'){ a_poly(g,[[hx-0.02*k,hy+0.02*k],[hx+0.02*k,hy+0.02*k],[hx+0.06*k,hy-0.34*k],[hx-0.05*k,hy-0.34*k]],'#7a5a34'); }
+  if(W==='dagger'){ a_poly(g,[[hx-0.012*k,hy],[hx+0.012*k,hy],[hx,hy-0.16*k]],'#dfe4ea'); }
+  if(W==='fire'){ g.save(); g.fillStyle='rgba(255,140,40,0.5)'; g.beginPath(); g.arc(hx+0.02*k,hy-0.08*k,0.11*k,0,Math.PI*2); g.fill(); g.restore(); a_poly(g,[[hx-0.04*k,hy-0.02*k],[hx+0.02*k,hy-0.2*k],[hx+0.07*k,hy-0.02*k]],'#ffb030'); }
+  if(o.extra) o.extra(u,v,k);
+}
+function quad(g,T,o){
+  const {u,v,s}=ART_ctx(g,T,o.s||1,o.ox), k=T*s, col=o.col, dk=o.dark||'rgba(0,0,0,0.22)';
+  const legH=o.legH||0.2, by=legH+0.13;
+  if(o.tail) a_line(g,u(-0.25),v(by+0.05),u(-0.36),v(by-0.08),col,Math.max(1.5,k*0.04));
+  // дальние ноги
+  [[-0.17],[0.13]].forEach(([x])=>a_poly(g,[[u(x),v(by)],[u(x+0.06),v(by)],[u(x+0.06),v(0)],[u(x),v(0)]],o.legCol||col));
+  g.save(); g.globalAlpha=0.35; [[-0.17],[0.13]].forEach(([x])=>{ g.fillStyle='#000'; g.fillRect(u(x),v(by),0.06*k,legH*k+0.13*k); }); g.restore();
+  a_ell(g,u(0),v(by+0.02),0.27*k,0.14*k,col);
+  g.fillStyle=dk; g.beginPath(); g.ellipse(u(0.02),v(by-0.05),0.22*k,0.06*k,0,0,Math.PI*2); g.fill();
+  [[-0.1],[0.2]].forEach(([x])=>a_poly(g,[[u(x),v(by-0.04)],[u(x+0.06),v(by-0.04)],[u(x+0.06),v(0)],[u(x),v(0)]],o.legCol||col));
+  if(o.mane) a_ell(g,u(0.24),v(by+0.12),0.15*k,0.15*k,o.mane);
+  const hx=0.3, hy=by+(o.headUp||0.12);
+  a_ell(g,u(hx),v(hy),(o.headR||0.1)*k,(o.headR||0.1)*0.9*k,o.headCol||col);
+  if(o.snout!==false) a_ell(g,u(hx+0.08),v(hy-0.03),0.06*k,0.045*k,o.snoutCol||col);
+  if(o.ears!==false) a_poly(g,[[u(hx-0.06),v(hy+0.06)],[u(hx-0.03),v(hy+0.16)],[u(hx+0.01),v(hy+0.08)]],o.headCol||col);
+  a_ell(g,u(hx+0.03),v(hy+0.02),0.014*k,0.016*k,o.eye||'#1b120a',true);
+  if(o.tusks){ g.save(); g.fillStyle='#f4ecd8'; g.beginPath(); g.moveTo(u(hx+0.08),v(hy-0.06)); g.quadraticCurveTo(u(hx+0.16),v(hy-0.05),u(hx+0.15),v(hy+0.02)); g.lineTo(u(hx+0.1),v(hy-0.04)); g.closePath(); g.fill(); g.stroke(); g.restore(); }
+  if(o.extra) o.extra(u,v,k,by,hx,hy);
+}
+const UNIT_ART={
+  swordsmen:(g,T)=>hum(g,T,{tunic:'#b0392b',head:'helm',weapon:'sword',shield:'#8b5a2b',shieldMark:'#e3b23c'}),
+  archers:(g,T)=>hum(g,T,{tunic:'#3d7a3a',head:'hood',hoodCol:'#2e5c2b',weapon:'bow',legs:'#5a4632'}),
+  pikemen:(g,T)=>hum(g,T,{tunic:'#2f5f9a',head:'helm',weapon:'spear',shield:'#3f6e9e'}),
+  priests:(g,T)=>hum(g,T,{robe:true,tunic:'#f2eee2',head:'hair',hairCol:'#c9b48a',weapon:'staff',orb:'#ffe58a',orbGlow:'rgba(255,229,138,0.4)',
+    chest:(u,v,k)=>{ a_line(g,u(0),v(0.42),u(0),v(0.26),'#e3b23c',Math.max(1.5,k*0.035)); a_line(g,u(-0.05),v(0.37),u(0.05),v(0.37),'#e3b23c',Math.max(1.5,k*0.035)); }}),
+  mages:(g,T)=>hum(g,T,{robe:true,tunic:'#3b4fa8',head:'wizard',hatCol:'#2c3b80',beard:'#e8e8e8',weapon:'staff'}),
+  knights:(g,T)=>hum(g,T,{tunic:'#b8bec6',arm:'#a4aab2',legs:'#8d939b',head:'greathelm',plume:'#c0392b',weapon:'sword',shield:'#3f6e9e',shieldMark:'#f2f2f2',cloak:'#7a2a2a'}),
+  vityaz:(g,T)=>{ quad(g,T,{col:'#8a5a34',s:0.95,legH:0.22,mane:'#3a2414',tail:true,ears:true});
+    hum(g,T,{s:0.66,ox:-0.03,oy:0.2,robe:true,tunic:'#c9ced4',arm:'#b8bec6',head:'greathelm',helmCol:'#d9b45a',plume:'#c0392b',weapon:'spear',shield:'#c0392b',shieldMark:'#e3b23c',cloak:'#2f4f9a'}); },
+  elves:(g,T)=>hum(g,T,{tunic:'#4f8f3c',head:'hair',hairCol:'#e6d27a',hairBack:'#e6d27a',ears:true,weapon:'bow',legs:'#3e5b2a',cloak:'#2f5f2b'}),
+  leshy:(g,T)=>hum(g,T,{tunic:'#6b4a2a',arm:'#6b4a2a',legs:'#5a3d22',skin:'#8a6a44',hand:'#5a3d22',belt:false,weapon:'club',
+    extra:(u,v,k)=>{ a_ell(g,u(-0.02),v(0.66),0.16*k,0.12*k,'#3f7a2e'); a_ell(g,u(0.08),v(0.62),0.1*k,0.08*k,'#4f8f3c'); a_ell(g,u(0.02),v(0.57),0.012*k,0.016*k,'#ffe066',true); a_ell(g,u(0.06),v(0.57),0.012*k,0.016*k,'#ffe066',true); }}),
+  druids:(g,T)=>hum(g,T,{robe:true,tunic:'#7a5a34',head:'hood',hoodCol:'#5c7a34',beard:'#ddd',weapon:'staff',orb:'#9dff6a',orbGlow:'rgba(157,255,106,0.4)'}),
+  centaurs:(g,T)=>{ quad(g,T,{col:'#9a6a3c',s:0.95,legH:0.22,tail:true,snout:false,ears:false,headR:0.001,eye:'rgba(0,0,0,0)'});
+    hum(g,T,{s:0.72,ox:0.17,oy:0.18,robe:true,tunic:'#d9a97a',arm:'#d9a97a',skin:'#d9a97a',head:'hair',hairCol:'#3a2414',weapon:'bow'}); },
+  treants:(g,T)=>{ const {u,v}=ART_ctx(g,T,1.15), k=T*1.15;
+    a_poly(g,[[u(-0.12),v(0)],[u(-0.08),v(0.45)],[u(0.08),v(0.45)],[u(0.13),v(0)],[u(0.2),v(-0.01)],[u(0.06),v(0.06)],[u(-0.06),v(0.06)],[u(-0.2),v(-0.01)]],'#6b4a2a');
+    a_line(g,u(-0.06),v(0.35),u(-0.24),v(0.48),'#6b4a2a',k*0.05); a_line(g,u(0.06),v(0.32),u(0.24),v(0.44),'#6b4a2a',k*0.05);
+    a_ell(g,u(-0.12),v(0.58),0.16*k,0.13*k,'#2f6b2a'); a_ell(g,u(0.12),v(0.6),0.16*k,0.13*k,'#2f6b2a'); a_ell(g,u(0),v(0.7),0.18*k,0.14*k,'#3d823e');
+    a_ell(g,u(-0.03),v(0.32),0.02*k,0.025*k,'#ffe066',true); a_ell(g,u(0.04),v(0.32),0.02*k,0.025*k,'#ffe066',true); a_line(g,u(-0.03),v(0.23),u(0.05),v(0.23),'#2a1a0e',k*0.02); },
+  spiders:(g,T)=>{ const {u,v}=ART_ctx(g,T,1), k=T;
+    for(let i=0;i<4;i++){ const y=0.16+i*0.03; a_line(g,u(-0.04),v(y),u(-0.28+i*0.02),v(0.0),'#2a2228',k*0.03); a_line(g,u(0.04),v(y),u(0.3-i*0.03),v(0.0),'#2a2228',k*0.03); }
+    a_ell(g,u(-0.08),v(0.2),0.16*k,0.12*k,'#3a2e36'); a_ell(g,u(0.12),v(0.16),0.08*k,0.07*k,'#2a2228');
+    a_ell(g,u(0.14),v(0.18),0.014*k,0.014*k,'#ff4040',true); a_ell(g,u(0.18),v(0.18),0.014*k,0.014*k,'#ff4040',true); a_ell(g,u(-0.1),v(0.25),0.05*k,0.03*k,'#c0392b',true); },
+  boars:(g,T)=>quad(g,T,{col:'#6b4a33',legH:0.13,headR:0.1,snoutCol:'#8a6a52',tusks:true,tail:true,
+    extra:(u,v,k,by)=>{ for(let i=0;i<5;i++) a_line(g,u(-0.15+i*0.08),v(by+0.13),u(-0.17+i*0.08),v(by+0.2),'#3a2618',k*0.025); }}),
+  snakes:(g,T)=>{ const {u,v}=ART_ctx(g,T,1), k=T;
+    g.save(); g.strokeStyle='#2f6b2a'; g.lineWidth=k*0.11; g.lineCap='round'; g.beginPath(); g.moveTo(u(-0.28),v(0.05)); g.bezierCurveTo(u(-0.1),v(-0.05),u(-0.05),v(0.2),u(0.08),v(0.12)); g.bezierCurveTo(u(0.2),v(0.05),u(0.15),v(0.32),u(0.12),v(0.36)); g.stroke();
+    g.strokeStyle='#4f9a3c'; g.lineWidth=k*0.05; g.stroke(); g.restore();
+    a_ell(g,u(0.15),v(0.4),0.08*k,0.06*k,'#2f6b2a'); a_ell(g,u(0.18),v(0.42),0.014*k,0.014*k,'#ffe066',true); a_line(g,u(0.22),v(0.38),u(0.28),v(0.37),'#c0392b',k*0.015); },
+  wolves:(g,T)=>quad(g,T,{col:'#8a8f98',legH:0.18,headR:0.09,snoutCol:'#9aa0a8',tail:true}),
+  lions:(g,T)=>quad(g,T,{col:'#d8a64a',legH:0.18,mane:'#8a4f1f',headR:0.09,tail:true,ears:false}),
+  gorillas:(g,T)=>hum(g,T,{s:1.05,tunic:'#3a3530',arm:'#3a3530',legs:'#2e2a26',skin:'#6b5a50',hand:'#2e2a26',belt:false,head:'hair',hairCol:'#2e2a26'}),
+  elephants:(g,T)=>quad(g,T,{s:1.2,col:'#8f949c',legH:0.16,headR:0.12,snout:false,ears:false,
+    extra:(u,v,k,by,hx,hy)=>{ a_ell(g,u(hx-0.06),v(hy),0.08*k,0.11*k,'#7d828a'); g.save(); g.strokeStyle='#8f949c'; g.lineWidth=k*0.06; g.beginPath(); g.moveTo(u(hx+0.08),v(hy-0.03)); g.quadraticCurveTo(u(hx+0.16),v(hy-0.12),u(hx+0.1),v(hy-0.24)); g.stroke(); g.restore();
+      g.save(); g.fillStyle='#f4ecd8'; g.beginPath(); g.moveTo(u(hx+0.05),v(hy-0.06)); g.quadraticCurveTo(u(hx+0.14),v(hy-0.12),u(hx+0.15),v(hy-0.04)); g.lineTo(u(hx+0.07),v(hy-0.04)); g.fill(); g.stroke(); g.restore(); }}),
+  skeletons:(g,T)=>hum(g,T,{tunic:'#e9e4d6',arm:'#e9e4d6',legs:'#e9e4d6',skin:'#f2eee2',hand:'#e9e4d6',eyes:'#111',belt:false,weapon:'sword',shield:'#7a6a50',
+    chest:(u,v,k)=>{ for(let i=0;i<3;i++) a_line(g,u(-0.08),v(0.42-i*0.06),u(0.08),v(0.42-i*0.06),'rgba(60,50,40,0.6)',Math.max(1,k*0.02)); }}),
+  zombies:(g,T)=>hum(g,T,{tunic:'#5a6b4a',arm:'#7a9a6a',legs:'#4a3c2c',skin:'#9ab88a',hand:'#9ab88a',eyes:'#c03030',head:'hair',hairCol:'#3a3a2a'}),
+  ghosts:(g,T)=>{ const {u,v}=ART_ctx(g,T,1), k=T; g.save(); g.globalAlpha=0.85;
+    a_poly(g,[[u(-0.16),v(0.5)],[u(0),v(0.68)],[u(0.16),v(0.5)],[u(0.17),v(0.1)],[u(0.1),v(0.16)],[u(0.04),v(0.06)],[u(-0.03),v(0.15)],[u(-0.1),v(0.05)],[u(-0.17),v(0.12)]],'#eef2f6');
+    g.restore(); a_ell(g,u(-0.04),v(0.48),0.03*k,0.045*k,'#1b2230',true); a_ell(g,u(0.05),v(0.48),0.03*k,0.045*k,'#1b2230',true); a_ell(g,u(0.005),v(0.38),0.03*k,0.04*k,'#1b2230',true); },
+  wraiths:(g,T)=>{ const {u,v}=ART_ctx(g,T,1), k=T;
+    a_poly(g,[[u(-0.13),v(0.56)],[u(0),v(0.72)],[u(0.13),v(0.56)],[u(0.2),v(0.1)],[u(0.08),v(0.18)],[u(0),v(0.06)],[u(-0.08),v(0.18)],[u(-0.2),v(0.1)]],'#2e2a3a');
+    a_ell(g,u(0.01),v(0.54),0.08*k,0.08*k,'#0e0c14',true); a_ell(g,u(-0.02),v(0.55),0.015*k,0.012*k,'#8ff0ff',true); a_ell(g,u(0.04),v(0.55),0.015*k,0.012*k,'#8ff0ff',true);
+    a_line(g,u(0.12),v(0.36),u(0.24),v(0.3),'#2e2a3a',k*0.05); },
+  vampires:(g,T)=>hum(g,T,{tunic:'#2a1a22',arm:'#2a1a22',legs:'#1a1016',skin:'#e6e2ea',eyes:'#c01818',head:'hair',hairCol:'#120c10',cloak:'#7a1020',weapon:'sword'}),
+  liches:(g,T)=>hum(g,T,{robe:true,tunic:'#3a2e4a',skin:'#e9e4d6',hand:'#e9e4d6',eyes:'#6aff9a',head:'crown',crownCol:'#b08a3a',weapon:'staff',orb:'#6aff9a',orbGlow:'rgba(106,255,154,0.4)'}),
+  goblins:(g,T)=>hum(g,T,{s:0.8,tunic:'#7a5a34',skin:'#7fae4a',hand:'#7fae4a',ears:true,eyes:'#ffe066',weapon:'dagger',legs:'#5a4632'}),
+  orcs:(g,T)=>hum(g,T,{s:1.05,tunic:'#5a4a3a',arm:'#5f8a3a',skin:'#5f8a3a',hand:'#5f8a3a',tusks:true,head:'hair',hairCol:'#1a1a1a',weapon:'axe',shield:'#6b4a2a'}),
+  trolls:(g,T)=>hum(g,T,{s:1.15,tunic:'#6a6a55',arm:'#7a8a8f',skin:'#7a8a8f',hand:'#7a8a8f',legs:'#5a5a48',ears:true,weapon:'club',belt:false}),
+  giants:(g,T)=>hum(g,T,{s:1.22,tunic:'#8a6a44',skin:'#e0b48a',beard:'#7a4a22',head:'hair',hairCol:'#7a4a22',weapon:'club',legs:'#5a4632'}),
+  cyclopes:(g,T)=>hum(g,T,{s:1.2,tunic:'#7a5a34',skin:'#c9a07a',oneEye:true,head:'horns',weapon:'club',legs:'#5a4632'}),
+  demons:(g,T)=>hum(g,T,{s:1.05,tunic:'#8a1a14',arm:'#c0392b',skin:'#c0392b',hand:'#c0392b',legs:'#5a0e0a',eyes:'#ffe066',head:'horns',weapon:'fire',
+    extra:(u,v,k)=>{ g.save(); g.globalCompositeOperation='destination-over'; a_poly(g,[[u(-0.1),v(0.44)],[u(-0.36),v(0.66)],[u(-0.3),v(0.4)],[u(-0.36),v(0.3)],[u(-0.12),v(0.3)]],'#4a0e0a'); g.restore(); }}),
+  dragon:(g,T)=>{ const {u,v}=ART_ctx(g,T,1.15), k=T*1.15;
+    a_poly(g,[[u(-0.05),v(0.36)],[u(-0.3),v(0.78)],[u(-0.12),v(0.62)],[u(-0.02),v(0.72)],[u(0.02),v(0.4)]],'#7a1d14');
+    a_line(g,u(-0.24),v(0.22),u(-0.4),v(0.1),'#b03a24',k*0.06);
+    [[-0.16],[0.1]].forEach(([x])=>a_poly(g,[[u(x),v(0.2)],[u(x+0.07),v(0.2)],[u(x+0.08),v(0)],[u(x-0.01),v(0)]],'#8a2a1a'));
+    a_ell(g,u(-0.02),v(0.26),0.25*k,0.13*k,'#b03a24'); a_ell(g,u(0),v(0.2),0.18*k,0.05*k,'#e8b04a',true);
+    a_poly(g,[[u(0.14),v(0.34)],[u(0.24),v(0.6)],[u(0.3),v(0.56)],[u(0.22),v(0.3)]],'#b03a24');
+    a_ell(g,u(0.3),v(0.6),0.09*k,0.065*k,'#b03a24'); a_ell(g,u(0.37),v(0.58),0.05*k,0.035*k,'#b03a24');
+    a_poly(g,[[u(0.26),v(0.66)],[u(0.22),v(0.76)],[u(0.29),v(0.67)]],'#e8dcc8'); a_ell(g,u(0.32),v(0.62),0.014*k,0.014*k,'#ffe066',true);
+    a_poly(g,[[u(0.06),v(0.36)],[u(0.18),v(0.82)],[u(0.24),v(0.6)],[u(0.36),v(0.7)],[u(0.16),v(0.32)]],'#8a2a1a'); },
+  hero_knight:(g,T)=>hum(g,T,{tunic:'#c9ced4',arm:'#b8bec6',legs:'#8d939b',head:'greathelm',helmCol:'#d9dde2',plume:'#3f7fd0',weapon:'sword',shield:'#3f7fd0',shieldMark:'#e3b23c',cloak:'#2f4f9a'}),
+  hero_sorceress:(g,T)=>hum(g,T,{robe:true,tunic:'#6a3aa8',head:'hair',hairCol:'#c0392b',hairBack:'#c0392b',weapon:'staff',orb:'#e0a3ff',orbGlow:'rgba(224,163,255,0.45)',cloak:'#3b1f66'}),
+  hero_ranger:(g,T)=>hum(g,T,{tunic:'#4f7a3a',head:'hood',hoodCol:'#2f4f2a',ears:true,weapon:'bow',cloak:'#2a3f22',legs:'#5a4632'}),
+  hero_classic:(g,T)=>hum(g,T,{tunic:'#4f7a3a',head:'hair',hairCol:'#e6d27a',ears:true,weapon:'sword',cloak:'#2f5f2b'}),
+  npc_wizard:(g,T)=>hum(g,T,{robe:true,tunic:'#2f5f9a',head:'wizard',hatCol:'#244a7a',beard:'#f2f2f2',weapon:'staff',orb:'#ffe58a',orbGlow:'rgba(255,229,138,0.45)'}),
+  npc_sorcerer:(g,T)=>hum(g,T,{robe:true,tunic:'#1e1626',head:'hood',hoodCol:'#120c18',skin:'#9a8aa8',eyes:'#d070ff',weapon:'staff',orb:'#b040ff',orbGlow:'rgba(176,64,255,0.5)',cloak:'#3a1050'}),
+};
+/* Фигура без подставки — для боя (подставку цвета стороны рисует поле боя). flip — смотреть влево. */
+SPRITES.fig=function(g,T,extra){ const [key,flip]=extra.split('|'); const art=UNIT_ART[key];
+  if(!art){ g.textAlign='center'; g.textBaseline='middle'; g.font=`${Math.round(T*0.62)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; g.fillStyle='#000'; g.fillText((UNITS[key]&&UNITS[key].emoji)||'?',T/2,T*0.45); return; }
+  if(flip==='1'){ g.translate(T,0); g.scale(-1,1); }
+  art(g,T); };
+/* Фишка для карты: подставка с кольцом + фигура. */
+SPRITES.unitTok=function(g,T,extra){ const [key,ring]=extra.split('|');
+  g.fillStyle='rgba(0,0,0,0.32)'; g.beginPath(); g.ellipse(0.52*T,0.86*T,0.36*T,0.11*T,0,0,Math.PI*2); g.fill();
+  g.fillStyle=ring||'#888'; g.beginPath(); g.ellipse(0.5*T,0.8*T,0.34*T,0.12*T,0,0,Math.PI*2); g.fill(); g.stroke();
+  g.fillStyle='rgba(255,255,255,0.35)'; g.beginPath(); g.ellipse(0.5*T,0.77*T,0.24*T,0.06*T,0,0,Math.PI*2); g.fill();
+  g.save(); g.translate(0.05*T,0.02*T); g.scale(0.9,0.9); SPRITES.fig(g,T,key+'|0'); g.restore(); };
+function lairUnitKey(p){ return (p.enemies&&p.enemies.length)?p.enemies.reduce((a,b)=>UNITS[b.key].tier>UNITS[a.key].tier?b:a).key:null; }
+
+/* Картинки для интерфейса: фигурка отряда и заставка города — те же спрайты, что на карте, превращённые в <img>. */
+const imgCache={};
+function spriteURL(kind,T,extra){ const k=kind+'|'+T+'|'+extra+'|'+curCont; if(!imgCache[k]) imgCache[k]=sprite(kind,T,2,extra).toDataURL(); return imgCache[k]; }
+function unitImg(key){ return `<img class="uimg" alt="" src="${spriteURL('fig',48,key+'|0')}">`; }
+function cityBannerURL(p){
+  const kind=p.type==='city'?((CITY1&&p.r===CITY1.r&&p.c===CITY1.c)?'capital':'city'):p.type==='castle'||p.type==='governor'?'castle':p.isCave?'cave':p.isCamp?'camp':'city';
+  const extra=kind==='castle'?(p.owner==='player'?'own':'gov'):'';
+  const k='banner|'+kind+'|'+extra+'|'+curCont; if(imgCache[k]) return imgCache[k];
+  const W=600,H=170,T=120, cv=document.createElement('canvas'); cv.width=W; cv.height=H; const g=cv.getContext('2d');
+  ensureGfxCache(60,1); const tex=gfxCache.tex, P=pal();
+  for(let y=0;y<H;y+=60) for(let x=0;x<W;x+=60) g.drawImage(tex['g'+((x/60+y/60)%4)],x,y,60,60);
+  for(let i=0;i<14;i++){ const x=(i*97)%W, y=20+((i*53)%60), r=16+(i%3)*5; g.fillStyle=P.tree[0]; g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.fill(); g.fillStyle=P.tree[1]; g.beginPath(); g.arc(x-r*0.15,y-r*0.15,r*0.75,0,Math.PI*2); g.fill(); }
+  const spr=sprite(kind,T,1,extra); g.drawImage(spr,W/2-T/2,H-T*SPR_H-6,T,T*SPR_H);
+  [[-170,'city'],[170,'city']].forEach(([dx])=>{ if(kind==='city'||kind==='capital'){ const s2=sprite('city',70,1,''); g.drawImage(s2,W/2+dx-35,H-70*SPR_H-10,70,70*SPR_H); } });
+  const v=g.createRadialGradient(W/2,H/2,H*0.3,W/2,H/2,W*0.6); v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,'rgba(0,0,0,0.55)'); g.fillStyle=v; g.fillRect(0,0,W,H);
+  imgCache[k]=cv.toDataURL('image/jpeg',0.85); return imgCache[k];
+}
+function heroTok(){ return {k:'unitTok',x:'hero_'+(HERO_CLASSES[heroClass]?heroClass:'classic')+'|#4d84c4'}; }
 function objectAt(r,c,skipHero){
   const isHero=r===hero.row&&c===hero.col;
   if(!isExplored(r,c)&&!isHero) return null;
-  if(isHero&&!skipHero) return onShip?{k:'ship'}:{k:'token',x:heroEmoji()+'|#4d84c4'};
+  if(isHero&&!skipHero) return onShip?{k:'ship'}:heroTok();
   if(shipPos&&!onShip&&r===shipPos.r&&c===shipPos.c) return {k:'ship'};
-  if(sorcerer&&sorcerer.active&&r===sorcerer.r&&c===sorcerer.c) return {k:'token',x:'🌑|#6b35a8'};
+  if(sorcerer&&sorcerer.active&&r===sorcerer.r&&c===sorcerer.c) return {k:'unitTok',x:'npc_sorcerer|#6b35a8'};
   const p=poiAt(r,c); if(!p) return null;
   if(p.type==='qspot'&&p.hidden) return null;
   switch(p.type){
@@ -2721,8 +2959,8 @@ function objectAt(r,c,skipHero){
     case 'castle': return {k:'castle',x:p.owner==='player'?'own':(p.wallHp<=0?'ruin':'enemy')};
     case 'governor': return {k:'castle',x:p.owner==='player'?'own':'gov'};
     case 'port': case 'cave': case 'camp': case 'chest': case 'scroll': case 'waystone': case 'pyramid': case 'altar': case 'qspot': return {k:p.type};
-    case 'wizard': return {k:'token',x:p.emoji+'|#3f7fbf'};
-    case 'lair': return {k:'token',x:p.emoji+'|'+(p.roaming?'#c0463f':'#9a7a3a')};
+    case 'wizard': return {k:'unitTok',x:'npc_wizard|#3f7fbf'};
+    case 'lair': { const uk=lairUnitKey(p); return uk?{k:'unitTok',x:uk+'|'+(p.roaming?'#c0463f':'#9a7a3a')}:{k:'token',x:p.emoji+'|#9a7a3a'}; }
     default: return {k:'token',x:(p.emoji||'?')+'|#888888'};
   }
 }
@@ -2819,7 +3057,7 @@ function walkFrame(now){
   const fs=Math.round(T*0.64); g.textAlign='center'; g.textBaseline='middle'; g.font=`${fs}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
   const onWater=terrAt(Math.round(hr),Math.round(hc))==='w';
   const bob=onWater?Math.sin(prog*Math.PI*2)*T*0.025:-Math.abs(Math.sin(f*Math.PI))*T*0.08;
-  drawObject(g,onWater?{k:'ship'}:{k:'token',x:heroEmoji()+'|#4d84c4'},(hc-camC)*T,(hr-camR)*T+bob,T,screenDpr);
+  drawObject(g,onWater?{k:'ship'}:heroTok(),(hc-camC)*T,(hr-camR)*T+bob,T,screenDpr);
   drawAtmosphere(g,W,H);
   if(prog>=a.path.length-1){ walkAnim=null; const done=a.done; renderMap(); done(); return; }
   requestAnimationFrame(walkFrame);
@@ -2895,8 +3133,7 @@ function openMenu(){
   const inBattle=view==='battle';
   ['saveBtn','loadBtn','statsBtn','restartBtn'].forEach(id=>document.getElementById(id).disabled=inBattle);
 }
-document.getElementById('menuBtn').onclick=()=>{ syncTipsBtn(); document.getElementById('gfxBtn').textContent=`🎨 Графика: ${gfxMode==='new'?'новая':'классическая'}`; openMenu(); };
-document.getElementById('gfxBtn').onclick=()=>{ setGfxMode(gfxMode==='new'?'old':'new'); document.getElementById('gfxBtn').textContent=`🎨 Графика: ${gfxMode==='new'?'новая':'классическая'}`; };
+document.getElementById('menuBtn').onclick=()=>{ syncTipsBtn(); openMenu(); };
 document.getElementById('hudMoreBtn').onclick=()=>{
   const m=document.getElementById('hudMore'), open=m.classList.toggle('hidden');
   document.getElementById('hudMoreBtn').textContent=open?'▾':'▴';
@@ -2904,9 +3141,18 @@ document.getElementById('hudMoreBtn').onclick=()=>{
 };
 document.getElementById('legendBtn').onclick=()=>{
   closeModal();
-  openModal(`<h2>🗺️ Легенда карты</h2>${document.getElementById('legendSrc').innerHTML}
-    <div class="modalNote" style="margin-top:10px;">Зелёная рамка — куда можно дойти сегодня. Золотая — клетка, которую можно изменить работником (лес, скалы, вода) или где ждёт корабль.</div>
-    <button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Закрыть</button>`);
+  const it=(kind,extra,label)=>`<div><img alt="" src="${spriteURL(kind,48,extra)}">${label}</div>`;
+  openModal(`<h2>🗺️ Легенда карты</h2><div class="legendGrid">
+    ${it('unitTok','hero_'+(HERO_CLASSES[heroClass]?heroClass:'classic')+'|#4d84c4','Ваш герой')}
+    ${it('capital','','Столица')}${it('city','','Город — найм, лавки, поручения')}
+    ${it('castle','enemy','Вражеский замок')}${it('castle','own','Ваш замок')}${it('castle','gov','Хозяин Земли')}${it('castle','ruin','Замок с пробитыми стенами')}
+    ${it('unitTok','wolves|#c0463f','Бродячий отряд (преследует)')}${it('unitTok','orcs|#9a7a3a','Логово (стоит на месте)')}
+    ${it('port','','Пристань')}${it('ship','','Корабль')}${it('cave','','Пещера')}${it('camp','','Лагерь наёмников')}
+    ${it('chest','','Сундук')}${it('scroll','','Свиток')}${it('waystone','','Придорожный камень')}${it('pyramid','','Пирамида')}
+    ${it('altar','','Древний алтарь')}${it('unitTok','npc_wizard|#3f7fbf','Волшебник')}${it('unitTok','npc_sorcerer|#6b35a8','Чёрный Колдун')}${it('qspot','','Тайник поручения')}
+  </div>
+  <div class="modalNote" style="margin-top:10px;">Лес, скалы и воду убирают работники. Зелёная рамка — куда можно дойти сегодня, золотая — что можно изменить работником. ❗ — цель поручения. Тёмное — неразведанные земли.</div>
+  <button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Закрыть</button>`);
 };
 /* Справочник: только то, что игрок видел своими глазами (города с флагом seen). */
 let journalTab='cities';
@@ -3002,7 +3248,7 @@ const TIPS={
   day:'Ходы на сегодня кончились — нажмите <b>⏭️ День</b>. Каждое утро игра сохраняется сама.',
   workers:'Лес, скалы и воду убирают <b>работники</b>: 🪓 Лесоруб, ⛏️ Камнетёс, 🔨 Плотник. Нанимают их в гильдиях некоторых городов.',
   city:'В городе можно <b>нанять войска</b> и взять <b>поручение</b>. Размер армии ограничен <b>лидерством</b> 👥. В разных городах продаётся разное — всё увиденное записывается в 📖 Справочник (меню ☰).',
-  battle:'<b>Бой.</b> Отряд, чей ход, подсвечен. Нажмите на клетку, чтобы пойти, или на врага в красной рамке, чтобы ударить. Стрелки бьют издалека. Можно «Ждать» или «Отступить».',
+  battle:'<b>Бой.</b> Отряд, чей ход, подсвечен золотым кольцом. Нажмите на клетку, чтобы пойти, или на врага в красной пунктирной обводке — отряд сам подойдёт и ударит. Стрелки бьют издалека. Можно «Ждать» или «Отступить».',
   defeat:'Поражение: армия отступила в столицу и ослабла. В обычном режиме неудачу можно переиграть — меню ☰ → «Загрузить».',
   week:'Прошла неделя: города и ваши замки приносят <b>доход</b>, а армия требует <b>содержания</b>. Следите, чтобы казна не опустела.',
   castle:'Это <b>вражеский замок</b> 🏴. Захват даёт часть карты земли; все 8 частей открывают путь в следующую землю. Перед штурмом прикиньте силу гарнизона.',
@@ -3067,6 +3313,7 @@ function openMinimap(){
     else if(p.type==='pyramid'&&poiAt(p.r,p.c)) dot(p.r,p.c,'#d9a3ff',1.3);
   });
   if(shipPos&&!onShip) dot(shipPos.r,shipPos.c,'#ffffff',1.1);
+  { const n=questLair(); if(questState==='active'&&n&&!visited[key(n.r,n.c)+':lair']){ g.strokeStyle='#ffd34d'; g.lineWidth=2.5; g.beginPath(); g.arc(n.c*sc+sc/2,n.r*sc+sc/2,sc*2.2,0,Math.PI*2); g.stroke(); } }
   activeQuests().filter(q=>q.cont===curCont).forEach(q=>{ const t=questTargetPos(q); if(!t) return; g.strokeStyle='#ffd34d'; g.lineWidth=2.5; g.beginPath(); g.arc(t.c*sc+sc/2,t.r*sc+sc/2,sc*2.2,0,Math.PI*2); g.stroke(); });
   g.fillStyle='#ffffff'; g.beginPath(); g.arc(hero.col*sc+sc/2,hero.row*sc+sc/2,sc*1.3,0,Math.PI*2); g.fill();
   g.fillStyle='#1b140d'; g.beginPath(); g.arc(hero.col*sc+sc/2,hero.row*sc+sc/2,sc*0.6,0,Math.PI*2); g.fill();
@@ -3095,7 +3342,9 @@ function questTargetPos(q){
   if(q.type==='courier'){ const w=worlds[q.cont]; const d=w&&(w===worlds[curCont]?pois:w.pois).find(p=>p.type==='city'&&p.name===q.dest); return d?{r:d.r,c:d.c}:null; }
   return null;
 }
-function questTargetAt(r,c){ return activeQuests().some(q=>{ if(q.cont!==curCont) return false; const t=questTargetPos(q); return t&&t.r===r&&t.c===c; }); }
+function questTargetAt(r,c){
+  if(questState==='active'){ const n=questLair(); if(n&&n.r===r&&n.c===c&&!visited[key(n.r,n.c)+':lair']) return true; }
+  return activeQuests().some(q=>{ if(q.cont!==curCont) return false; const t=questTargetPos(q); return t&&t.r===r&&t.c===c; }); }
 function drawQuestBadge(g,x,y,T){
   const cx=x+T*0.8, cy=y+T*0.18, rr=Math.max(5,T*0.17);
   g.fillStyle='#ffd34d'; g.beginPath(); g.arc(cx,cy,rr,0,Math.PI*2); g.fill(); g.strokeStyle='#3a2a10'; g.lineWidth=1.5; g.stroke();
