@@ -56,6 +56,8 @@
   /* размер сетки и клеток задаёт JS (layoutViewport) под доступное место */
   #map{display:grid; gap:1px; background:#000; padding:3px; border-radius:10px; border:2px solid var(--accent); --tile:28px;}
   #map .icon{font-size:calc(var(--tile)*0.62);}
+  #map.gfx{display:block; padding:3px; line-height:0;}
+  #map.gfx canvas{display:block; border-radius:6px; touch-action:manipulation; cursor:pointer;}
   #battlefield{display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(6,1fr); gap:3px; box-sizing:border-box;
     width:100%; max-width:560px; aspect-ratio:8/6; background:var(--panel2); padding:4px; border-radius:10px; border:2px solid var(--accent);}
   .tile,.cell{position:relative; display:flex; align-items:center; justify-content:center; cursor:default; overflow:hidden;}
@@ -196,6 +198,7 @@
     <button id="statsBtn" class="secondary">📊 Летопись похода</button>
     <button id="journalBtn" class="secondary">📖 Справочник городов</button>
     <button id="legendBtn" class="secondary">🗺️ Легенда карты</button>
+    <button id="gfxBtn" class="secondary">🎨 Графика: новая</button>
     <button id="restartBtn" class="secondary">🔄 Новая игра</button>
     <button id="bugBtn" class="secondary">🐞 Сообщить об ошибке</button>
   </div>
@@ -204,7 +207,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.9.0', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.10.0', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='';
 const recentErrors=[];
@@ -328,6 +331,7 @@ const RANKS=[
 /* ================= WORLD GENERATION ================= */
 const ROWS=60, COLS=80, MOVE_BUDGET=10;
 let VIEW_ROWS=9, VIEW_COLS=13; // пересчитываются layoutViewport() под экран
+let TILE_PX=28;
 const TERRAIN={
   g:{cost:1,color:'#5a7d3a'}, f:{cost:Infinity,color:'#2f4a26'}, m:{cost:Infinity,color:'#5c5044'},
   s:{cost:3,color:'#3a4a2e'}, d:{cost:2,color:'#c2a878'}, w:{cost:Infinity,color:'#2c5d7a'}, r:{cost:1,color:'#9c8054'},
@@ -1902,6 +1906,7 @@ function layoutViewport(){
   }
   const changed=rows!==VIEW_ROWS||cols!==VIEW_COLS;
   VIEW_ROWS=rows; VIEW_COLS=cols;
+  TILE_PX=tile;
   mapEl.style.gridTemplateColumns=`repeat(${cols},${tile}px)`;
   mapEl.style.gridTemplateRows=`repeat(${rows},${tile}px)`;
   mapEl.style.setProperty('--tile',tile+'px');
@@ -1921,25 +1926,188 @@ window.addEventListener('orientationchange',relayout);
   try{ if(tg.initData&&tg.disableVerticalSwipes) tg.disableVerticalSwipes(); }catch(e){}
 })();
 
+function tileIcon(r,c){
+  if(r===hero.row&&c===hero.col) return onShip?'⛵':'🧝';
+  if(shipPos && r===shipPos.r && c===shipPos.c) return '⛵';
+  if(sorcerer && sorcerer.active && r===sorcerer.r && c===sorcerer.c) return '🌑';
+  const p=poiAt(r,c); if(!p) return '';
+  return (p.type==='castle'||p.type==='governor') ? (p.owner==='player'?p.emoji:(p.wallHp<=0?'🏴💥':p.type==='governor'?'👑':'🏴')) : p.emoji;
+}
+let camRowG=0, camColG=0;
 function renderMap(){
   saveSoon();
   const dist=dijkstra(); let html='';
   const camRow=Math.max(0,Math.min(ROWS-VIEW_ROWS, hero.row-Math.floor(VIEW_ROWS/2)));
   const camCol=Math.max(0,Math.min(COLS-VIEW_COLS, hero.col-Math.floor(VIEW_COLS/2)));
+  camRowG=camRow; camColG=camCol;
+  const mapEl=document.getElementById('map');
+  if(gfxMode==='new'){ mapEl.classList.add('gfx'); drawMapCanvas(dist,camRow,camCol); updateHud(); return; }
+  mapEl.classList.remove('gfx');
   for(let rr=0;rr<VIEW_ROWS;rr++) for(let cc=0;cc<VIEW_COLS;cc++){
     const r=camRow+rr, c=camCol+cc;
     const t=TERRAIN[tch(r,c)];
     const reach=dist[key(r,c)]!==undefined && !(r===hero.row&&c===hero.col);
     const canModify=!reach && adjacent(r,c) && (tch(r,c)==='f'||tch(r,c)==='w'||tch(r,c)==='m');
-    let icon='';
-    if(r===hero.row&&c===hero.col) icon=onShip?'⛵':'🧝';
-    else if(shipPos && r===shipPos.r && c===shipPos.c) icon='⛵';
-    else if(sorcerer && sorcerer.active && r===sorcerer.r && c===sorcerer.c) icon='🌑';
-    else{ const p=poiAt(r,c); if(p) icon = (p.type==='castle'||p.type==='governor') ? (p.owner==='player'?p.emoji:(p.wallHp<=0?'🏴💥':p.type==='governor'?'👑':'🏴')) : p.emoji; }
-    html+=`<div class="tile${reach?' reachable':''}${canModify?' modifiable':''}" style="background:${t.color}" onclick="tileClick(${r},${c})"><span class="icon">${icon}</span></div>`;
+    html+=`<div class="tile${reach?' reachable':''}${canModify?' modifiable':''}" style="background:${t.color}" onclick="tileClick(${r},${c})"><span class="icon">${tileIcon(r,c)}</span></div>`;
   }
-  document.getElementById('map').innerHTML=html;
+  mapEl.innerHTML=html;
   updateHud();
+}
+
+/* ================= GRAPHICS: CANVAS MAP (прототип) =================
+   Слои: 1) земля — процедурные текстуры с 4 вариантами на тип (вариант выбирается хешем клетки, поэтому картинка стабильна);
+   2) вода с береговой полосой и пеной по маске соседей (4 стороны + внешние углы);
+   3) дороги и мосты — 4-битная маска связей (N=1, E=2, S=4, W=8), города/замки/пристани считаются узлами дороги;
+   4) лес (группы деревьев) и горы (вершины) — объекты поверх земли, могут нависать над соседями;
+   5) подсветка доступных клеток; 6) значки.
+   Палитра своя у каждой земли. Текстуры рисуются один раз на размер клетки и палитру и кешируются. */
+let gfxMode=(()=>{ try{ return localStorage.getItem('morveyn_gfx')||'new'; }catch(e){ return 'new'; } })();
+function setGfxMode(m){ gfxMode=m; try{ localStorage.setItem('morveyn_gfx',m); }catch(e){} renderMap(); }
+const PALETTES=[
+  {grass:['#5b8c3b','#4b7a30','#6f9f49'],sand:['#d8c08a','#c4a96f'],swamp:['#4d5a35','#3a4a3a'],rock:['#77695a','#5d5246','#9a8c7a'],
+   water:['#2c6b90','#3f88ae'],beach:'#d9c590',tree:['#1f4a26','#2c6431','#3d823e'],peak:['#6c6052','#a1937f',null],road:['#b39463','#6e5638']},
+  {grass:['#8f9a4c','#7a8640','#a5ae5e'],sand:['#e3c47f','#cfab63'],swamp:['#6b6a3c','#57583a'],rock:['#9b7b5b','#7a5f45','#bb9c7b'],
+   water:['#2a7b8f','#45a0b0'],beach:'#ead39a',tree:['#4a5a2a','#5f7135','#76893f'],peak:['#94704f','#c39f78',null],road:['#c49c66','#7e6140']},
+  {grass:['#b9ccc5','#a0b6af','#dae6e2'],sand:['#e9eff1','#d3dde1'],swamp:['#91a5aa','#7d9399'],rock:['#8a909b','#6e737d','#b3b8c2'],
+   water:['#3a7fa8','#78b2d0'],beach:'#eef3f5',tree:['#1d4a3e','#2a5e4f','#3b7562'],peak:['#7d838f','#c2c8d2','#f6f9fb'],road:['#b4a998','#76695b']},
+  {grass:['#6b6355','#5a5347','#827865'],sand:['#8e6d55','#76583f'],swamp:['#4f3b33','#3e2d27'],rock:['#4c403b','#3a302c','#6e5b51'],
+   water:['#2f4f63','#4a6d80'],beach:'#7a6758',tree:['#352c24','#46392d','#5a4836'],peak:['#463a35','#6f5a50','#c4532f'],road:['#988670','#55493b']},
+  {grass:['#3f4e3b','#334030','#506149'],sand:['#6f6a5b','#5b5749'],swamp:['#35412f','#283325'],rock:['#4a4652','#38353f','#68636f'],
+   water:['#243b50','#365670'],beach:'#5e5a4d',tree:['#1b2a22','#24372d','#304738'],peak:['#47434f','#6d6878',null],road:['#7d7563','#45403a']},
+];
+function pal(){ return PALETTES[curCont]||PALETTES[0]; }
+function hash2(r,c,s){ let h=(r*73856093)^(c*19349663)^((s||0)*83492791); h=(h^(h>>>13))*1274126177; return ((h^(h>>>16))>>>0); }
+function hrand(r,c,s){ return hash2(r,c,s)/4294967296; }
+let texCache={key:'',tex:{}};
+function makeTex(T,dpr,draw,seed){
+  const cv=document.createElement('canvas'); cv.width=Math.ceil(T*dpr); cv.height=Math.ceil(T*dpr);
+  const g=cv.getContext('2d'); g.scale(dpr,dpr); const rng=mulberry32(seed); draw(g,T,rng); return cv;
+}
+function buildTextures(T,dpr){
+  const P=pal(), tex={};
+  const speckle=(g,T,rng,cols,n,w,h)=>{ for(let i=0;i<n;i++){ g.fillStyle=cols[Math.floor(rng()*cols.length)]; g.globalAlpha=0.35+rng()*0.4; g.fillRect(rng()*T,rng()*T,w*(0.6+rng()*0.8),h*(0.6+rng()*0.8)); } g.globalAlpha=1; };
+  for(let v=0;v<4;v++){
+    tex['g'+v]=makeTex(T,dpr,(g,T,rng)=>{ g.fillStyle=P.grass[0]; g.fillRect(0,0,T,T); speckle(g,T,rng,[P.grass[1],P.grass[2]],Math.round(T*1.4),T*0.05,T*0.09); },100+v);
+    tex['d'+v]=makeTex(T,dpr,(g,T,rng)=>{ g.fillStyle=P.sand[0]; g.fillRect(0,0,T,T);
+      g.strokeStyle=P.sand[1]; g.globalAlpha=0.55; g.lineWidth=Math.max(1,T*0.04);
+      for(let i=0;i<2;i++){ const y=T*(0.25+0.45*i+rng()*0.15); g.beginPath(); g.moveTo(-2,y); g.quadraticCurveTo(T*0.5,y-T*0.14,T+2,y); g.stroke(); }
+      g.globalAlpha=1; speckle(g,T,rng,[P.sand[1]],Math.round(T*0.5),T*0.03,T*0.03); },200+v);
+    tex['s'+v]=makeTex(T,dpr,(g,T,rng)=>{ g.fillStyle=P.swamp[0]; g.fillRect(0,0,T,T); speckle(g,T,rng,[P.grass[1]],Math.round(T*0.6),T*0.05,T*0.08);
+      for(let i=0;i<2;i++){ g.fillStyle=P.swamp[1]; g.globalAlpha=0.9; g.beginPath(); g.ellipse(T*(0.2+rng()*0.6),T*(0.2+rng()*0.6),T*(0.12+rng()*0.1),T*(0.06+rng()*0.05),0,0,Math.PI*2); g.fill(); }
+      g.globalAlpha=1; g.strokeStyle=P.grass[2]; g.lineWidth=Math.max(1,T*0.03);
+      for(let i=0;i<3;i++){ const x=rng()*T, y=T*(0.3+rng()*0.6); g.beginPath(); g.moveTo(x,y); g.lineTo(x+T*0.03,y-T*0.18); g.stroke(); } },300+v);
+    tex['w'+v]=makeTex(T,dpr,(g,T,rng)=>{ const gr=g.createLinearGradient(0,0,T,T); gr.addColorStop(0,P.water[0]); gr.addColorStop(1,P.water[1]); g.fillStyle=P.water[0]; g.fillRect(0,0,T,T);
+      g.globalAlpha=0.35; g.fillStyle=gr; g.fillRect(0,0,T,T); g.globalAlpha=0.35; g.strokeStyle='#ffffff'; g.lineWidth=Math.max(1,T*0.03);
+      for(let i=0;i<2;i++){ const x=rng()*T*0.7, y=T*(0.2+rng()*0.6); g.beginPath(); g.moveTo(x,y); g.quadraticCurveTo(x+T*0.08,y-T*0.06,x+T*0.16,y); g.quadraticCurveTo(x+T*0.24,y+T*0.06,x+T*0.32,y); g.stroke(); }
+      g.globalAlpha=1; },400+v);
+    tex['m'+v]=makeTex(T,dpr,(g,T,rng)=>{ g.fillStyle=P.rock[0]; g.fillRect(0,0,T,T); speckle(g,T,rng,[P.rock[1],P.rock[2]],Math.round(T*0.9),T*0.06,T*0.05); },500+v);
+  }
+  return tex;
+}
+function terrAt(r,c){ return (r<0||r>=ROWS||c<0||c>=COLS)?'w':terrainGrid[r][c]; }
+function isBridge(r,c){ return terrAt(r,c)==='r' && ((terrAt(r-1,c)==='w'&&terrAt(r+1,c)==='w')||(terrAt(r,c-1)==='w'&&terrAt(r,c+1)==='w')); }
+function isWaterish(r,c){ return terrAt(r,c)==='w'||isBridge(r,c); }
+function isRoadNode(r,c){
+  if(terrAt(r,c)==='r') return true;
+  const p=pois.find(q=>q.r===r&&q.c===c); return !!p&&['city','castle','governor','port'].includes(p.type);
+}
+function drawMapCanvas(dist,camRow,camCol){
+  const mapEl=document.getElementById('map');
+  const T=TILE_PX, W=VIEW_COLS*T, H=VIEW_ROWS*T, dpr=Math.min(3,window.devicePixelRatio||1);
+  let cv=mapEl.querySelector('canvas');
+  if(!cv){ mapEl.innerHTML=''; cv=document.createElement('canvas'); mapEl.appendChild(cv);
+    cv.addEventListener('click',e=>{ const b=cv.getBoundingClientRect(); const c=Math.floor((e.clientX-b.left)/(b.width/VIEW_COLS)), r=Math.floor((e.clientY-b.top)/(b.height/VIEW_ROWS));
+      if(r>=0&&r<VIEW_ROWS&&c>=0&&c<VIEW_COLS) tileClick(camRowG+r,camColG+c); }); }
+  if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){ cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr); cv.style.width=W+'px'; cv.style.height=H+'px'; }
+  const ck=T+'|'+dpr+'|'+curCont;
+  if(texCache.key!==ck){ texCache={key:ck,tex:buildTextures(T,dpr)}; }
+  const tex=texCache.tex, P=pal(), g=cv.getContext('2d');
+  g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  const blit=(name,x,y)=>g.drawImage(tex[name],x,y,T,T);
+  // слой 1–3: земля, вода с берегом, дороги
+  for(let rr=0;rr<VIEW_ROWS;rr++) for(let cc=0;cc<VIEW_COLS;cc++){
+    const r=camRow+rr, c=camCol+cc, t=terrAt(r,c), x=cc*T, y=rr*T, v=hash2(r,c)%4;
+    if(isWaterish(r,c)){
+      blit('w'+v,x,y);
+      // берег: полосы песка с пеной вдоль сторон, где суша; скруглённые внешние углы
+      const land=(dr,dc)=>!isWaterish(r+dr,c+dc);
+      const s=T*0.17; g.fillStyle=P.beach;
+      const N=land(-1,0),E=land(0,1),S=land(1,0),Wd=land(0,-1);
+      if(N) g.fillRect(x,y,T,s); if(S) g.fillRect(x,y+T-s,T,s); if(Wd) g.fillRect(x,y,s,T); if(E) g.fillRect(x+T-s,y,s,T);
+      // внешний угол: четверть круга строго внутри клетки (клип), продолжающая полосы соседей
+      const corner=(cx,cy,on)=>{ if(!on) return; g.save(); g.beginPath(); g.rect(x,y,T,T); g.clip();
+        g.beginPath(); g.arc(cx,cy,s,0,Math.PI*2); g.fill();
+        g.strokeStyle='rgba(255,255,255,0.55)'; g.lineWidth=Math.max(1,T*0.035); g.beginPath(); g.arc(cx,cy,s+1,0,Math.PI*2); g.stroke(); g.restore(); };
+      corner(x,y,!N&&!Wd&&land(-1,-1)); corner(x+T,y,!N&&!E&&land(-1,1)); corner(x,y+T,!S&&!Wd&&land(1,-1)); corner(x+T,y+T,!S&&!E&&land(1,1));
+      g.strokeStyle='rgba(255,255,255,0.55)'; g.lineWidth=Math.max(1,T*0.035); g.beginPath();
+      if(N){ g.moveTo(x,y+s+1); g.lineTo(x+T,y+s+1); } if(S){ g.moveTo(x,y+T-s-1); g.lineTo(x+T,y+T-s-1); }
+      if(Wd){ g.moveTo(x+s+1,y); g.lineTo(x+s+1,y+T); } if(E){ g.moveTo(x+T-s-1,y); g.lineTo(x+T-s-1,y+T); }
+      g.stroke();
+      if(isBridge(r,c)){ // мост: доски поперёк направления
+        const horiz=terrAt(r,c-1)!=='w'||terrAt(r,c+1)!=='w';
+        g.fillStyle=P.road[1]; g.fillRect(horiz?x:x+T*0.28,horiz?y+T*0.28:y,horiz?T:T*0.44,horiz?T*0.44:T);
+        g.strokeStyle='rgba(0,0,0,0.35)'; g.lineWidth=1; g.beginPath();
+        for(let i=1;i<5;i++){ if(horiz){ g.moveTo(x+i*T/5,y+T*0.28); g.lineTo(x+i*T/5,y+T*0.72); } else { g.moveTo(x+T*0.28,y+i*T/5); g.lineTo(x+T*0.72,y+i*T/5); } }
+        g.stroke();
+      }
+      continue;
+    }
+    if(t==='d') blit('d'+v,x,y); else if(t==='s') blit('s'+v,x,y); else if(t==='m') blit('m'+v,x,y); else blit('g'+v,x,y);
+    if(t==='r'){
+      const m=(isRoadNode(r-1,c)?1:0)|(isRoadNode(r,c+1)?2:0)|(isRoadNode(r+1,c)?4:0)|(isRoadNode(r,c-1)?8:0);
+      const w=T*0.5, o=(T-w)/2;
+      const segs=[[1,x+o,y,w,T/2+w/2],[2,x+T/2-w/2,y+o,T/2+w/2,w],[4,x+o,y+T/2-w/2,w,T/2+w/2],[8,x,y+o,T/2+w/2,w]];
+      [[P.road[1],0],[P.road[0],T*0.07]].forEach(([col,inset])=>{ g.fillStyle=col;
+        g.beginPath(); g.arc(x+T/2,y+T/2,w/2-inset,0,Math.PI*2); g.fill();
+        segs.forEach(([bit,sx,sy,sw,sh])=>{ if(m&bit){ const ix=(bit===1||bit===4)?inset:0, iy=(bit===2||bit===8)?inset:0; g.fillRect(sx+ix,sy+iy,sw-2*ix,sh-2*iy); } }); });
+    }
+  }
+  // слой 4: лес и горы (сверху вниз, чтобы нижние перекрывали верхние)
+  for(let rr=-1;rr<=VIEW_ROWS;rr++) for(let cc=-1;cc<=VIEW_COLS;cc++){
+    const r=camRow+rr, c=camCol+cc, t=terrAt(r,c), x=cc*T, y=rr*T;
+    if(t==='f'){
+      const n=3+(hash2(r,c,7)%2), trees=[];
+      for(let i=0;i<n;i++) trees.push([x+T*(0.18+hrand(r,c,10+i)*0.64), y+T*(0.22+hrand(r,c,20+i)*0.6), T*(0.2+hrand(r,c,30+i)*0.08)]);
+      trees.sort((a,b)=>a[1]-b[1]).forEach(([tx,ty,tr])=>{
+        g.fillStyle='rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(tx+tr*0.15,ty+tr*0.9,tr*0.9,tr*0.35,0,0,Math.PI*2); g.fill();
+        g.fillStyle=P.tree[0]; g.beginPath(); g.arc(tx,ty,tr,0,Math.PI*2); g.fill();
+        g.fillStyle=P.tree[1]; g.beginPath(); g.arc(tx-tr*0.15,ty-tr*0.15,tr*0.75,0,Math.PI*2); g.fill();
+        g.fillStyle=P.tree[2]; g.beginPath(); g.arc(tx-tr*0.3,ty-tr*0.32,tr*0.35,0,Math.PI*2); g.fill();
+        if(curCont===2){ g.fillStyle='rgba(255,255,255,0.8)'; g.beginPath(); g.arc(tx-tr*0.2,ty-tr*0.45,tr*0.25,0,Math.PI*2); g.fill(); }
+      });
+    } else if(t==='m'){
+      const n=1+(hash2(r,c,3)%2);
+      for(let i=0;i<n;i++){
+        const bx=x+T*(n===1?0.5:(i?0.68:0.34)), base=y+T*(0.92-i*0.05), hgt=T*(0.62+hrand(r,c,40+i)*0.22), hw=T*(n===1?0.42:0.32);
+        const px=bx+(hrand(r,c,50+i)-0.5)*T*0.12, py=base-hgt;
+        g.fillStyle=P.peak[0]; g.beginPath(); g.moveTo(bx-hw,base); g.lineTo(px,py); g.lineTo(bx+hw,base); g.closePath(); g.fill();
+        g.fillStyle=P.peak[1]; g.beginPath(); g.moveTo(bx-hw,base); g.lineTo(px,py); g.lineTo(px+hw*0.12,base); g.closePath(); g.fill();
+        const cap=P.peak[2]||(curCont===0||curCont===1?null:null);
+        if(P.peak[2]){ g.fillStyle=P.peak[2]; g.beginPath(); g.moveTo(px,py); g.lineTo(px-hw*0.28,py+hgt*0.28); g.lineTo(px+hw*0.28,py+hgt*0.28); g.closePath(); g.fill(); }
+      }
+    }
+  }
+  // лёгкая сетка — чтобы было видно, куда нажимать
+  g.strokeStyle='rgba(0,0,0,0.08)'; g.lineWidth=1; g.beginPath();
+  for(let i=1;i<VIEW_COLS;i++){ g.moveTo(i*T+0.5,0); g.lineTo(i*T+0.5,H); } for(let i=1;i<VIEW_ROWS;i++){ g.moveTo(0,i*T+0.5); g.lineTo(W,i*T+0.5); } g.stroke();
+  // слой 5–6: подсветка и значки
+  const fs=Math.round(T*0.64);
+  g.textAlign='center'; g.textBaseline='middle'; g.font=`${fs}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  for(let rr=0;rr<VIEW_ROWS;rr++) for(let cc=0;cc<VIEW_COLS;cc++){
+    const r=camRow+rr, c=camCol+cc, x=cc*T, y=rr*T, t=terrAt(r,c);
+    const reach=dist[key(r,c)]!==undefined && !(r===hero.row&&c===hero.col);
+    const canModify=!reach && adjacent(r,c) && (t==='f'||t==='w'||t==='m');
+    if(reach||canModify){
+      g.fillStyle=reach?'rgba(150,255,140,0.13)':'rgba(255,210,80,0.12)'; g.fillRect(x+1,y+1,T-2,T-2);
+      g.strokeStyle=reach?'rgba(170,255,150,0.75)':'rgba(255,205,70,0.95)'; g.lineWidth=Math.max(1.5,T*0.06);
+      const i=g.lineWidth/2+1; g.strokeRect(x+i,y+i,T-2*i,T-2*i);
+    }
+    const icon=tileIcon(r,c);
+    if(icon){
+      g.fillStyle='rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(x+T/2,y+T*0.8,T*0.3,T*0.1,0,0,Math.PI*2); g.fill();
+      g.fillText(icon,x+T/2,y+T*0.5);
+    }
+  }
 }
 
 /* ================= WIRING ================= */
@@ -1997,7 +2165,8 @@ function openMenu(){
   const inBattle=view==='battle';
   ['saveBtn','loadBtn','statsBtn','restartBtn'].forEach(id=>document.getElementById(id).disabled=inBattle);
 }
-document.getElementById('menuBtn').onclick=openMenu;
+document.getElementById('menuBtn').onclick=()=>{ document.getElementById('gfxBtn').textContent=`🎨 Графика: ${gfxMode==='new'?'новая':'классическая'}`; openMenu(); };
+document.getElementById('gfxBtn').onclick=()=>{ setGfxMode(gfxMode==='new'?'old':'new'); document.getElementById('gfxBtn').textContent=`🎨 Графика: ${gfxMode==='new'?'новая':'классическая'}`; };
 document.getElementById('hudMoreBtn').onclick=()=>{
   const m=document.getElementById('hudMore'), open=m.classList.toggle('hidden');
   document.getElementById('hudMoreBtn').textContent=open?'▾':'▴';
@@ -2141,6 +2310,7 @@ function doRestart(hard){
   governorWage=0; heroMagicPower=5; quasiExpireWeek=0; quasiBonus=0;
   spellCharges={heal:0,fireball:0,haste:0,multiply:0,resurrect:0,infection:0,towngate:0,givearmy:0,quasi:0,tornado:0};
   stats=freshStats(); lastGoldSeen=gold; gameOverReason='';
+  clearManualSave();
   startNewWorld();
   showView('map'); setInfo('Новый мир сгенерирован.'); renderMap();
   saveSoon(true); updateSaveButtons();
@@ -2212,50 +2382,59 @@ function restoreGame(json){
   return true;
 }
 
+/* Две ячейки: 'auto' (утро, плавание, новая игра; в жёстком режиме — всё подряд) и 'manual' (кнопка «Сохранить»).
+   Снимок состояния делается В МОМЕНТ сохранения и уже готовой строкой уходит и на устройство, и в облако —
+   медленная запись в облако Telegram больше не может подменить его более поздним состоянием. */
+const SLOT_LOCAL={auto:SAVE_KEY, manual:SAVE_KEY+'_manual'};
+const SLOT_CLOUD={auto:CLOUD_PREFIX, manual:CLOUD_PREFIX+'m'};
 const LocalStore={
-  save(str){ try{ localStorage.setItem(SAVE_KEY,str); return true; }catch(e){ return false; } },
-  load(){ try{ return localStorage.getItem(SAVE_KEY); }catch(e){ return null; } },
-  clear(){ try{ localStorage.removeItem(SAVE_KEY); }catch(e){} }
+  save(slot,str){ try{ localStorage.setItem(SLOT_LOCAL[slot],str); return true; }catch(e){ return false; } },
+  load(slot){ try{ return localStorage.getItem(SLOT_LOCAL[slot]); }catch(e){ return null; } },
+  clear(slot){ try{ localStorage.removeItem(SLOT_LOCAL[slot]); }catch(e){} }
 };
-const CloudStore={
-  slot:null,
+function makeCloudStore(prefix){ return {
+  slot:null, busy:false, pending:null,
   call(fn,...args){ return new Promise((res,rej)=>{ try{ TG.CloudStorage[fn](...args,(err,val)=>err?rej(err):res(val)); }catch(e){ rej(e); } }); },
-  async save(str){
-    if(this.slot===null){ try{ const m=JSON.parse(await this.call('getItem',CLOUD_PREFIX+'_meta')||'null'); this.slot=m?m.slot:'b'; }catch(e){ this.slot='b'; } }
+  async write(str){
+    if(this.slot===null){ try{ const m=JSON.parse(await this.call('getItem',prefix+'_meta')||'null'); this.slot=m?m.slot:'b'; }catch(e){ this.slot='b'; } }
     const slot=this.slot==='a'?'b':'a', n=Math.ceil(str.length/CLOUD_CHUNK);
-    await Promise.all(Array.from({length:n},(_,i)=>this.call('setItem',`${CLOUD_PREFIX}_${slot}${i}`,str.slice(i*CLOUD_CHUNK,(i+1)*CLOUD_CHUNK))));
-    await this.call('setItem',CLOUD_PREFIX+'_meta',JSON.stringify({slot,n,len:str.length}));
+    await Promise.all(Array.from({length:n},(_,i)=>this.call('setItem',`${prefix}_${slot}${i}`,str.slice(i*CLOUD_CHUNK,(i+1)*CLOUD_CHUNK))));
+    await this.call('setItem',prefix+'_meta',JSON.stringify({slot,n,len:str.length}));
     this.slot=slot;
   },
+  // очередь: пока идёт запись, новый снимок ждёт; ждёт только самый свежий, но это всегда готовая строка, а не «текущее состояние»
+  async save(str){
+    if(this.busy){ this.pending=str; return; }
+    this.busy=true;
+    try{ await this.write(str); setSaveBadge(`☁️ ${lastSaveLabel||'✓'}`); }catch(e){ setSaveBadge('☁️✗'); }
+    this.busy=false;
+    if(this.pending!==null){ const next=this.pending; this.pending=null; this.save(next); }
+  },
+  async clear(){ this.pending=null; try{ await this.call('setItem',prefix+'_meta',''); }catch(e){} },
   async load(){
-    const m=JSON.parse(await this.call('getItem',CLOUD_PREFIX+'_meta')||'null'); if(!m) return null;
-    const keys=Array.from({length:m.n},(_,i)=>`${CLOUD_PREFIX}_${m.slot}${i}`);
+    const m=JSON.parse(await this.call('getItem',prefix+'_meta')||'null'); if(!m) return null;
+    const keys=Array.from({length:m.n},(_,i)=>`${prefix}_${m.slot}${i}`);
     const vals=await this.call('getItems',keys);
     const str=keys.map(k=>vals[k]||'').join('');
     this.slot=m.slot;
     return str.length===m.len?str:null;
   }
-};
+}; }
+const CloudSlots={auto:makeCloudStore(SLOT_CLOUD.auto), manual:makeCloudStore(SLOT_CLOUD.manual)};
 function withTimeout(promise,ms){ return Promise.race([promise,new Promise(res=>setTimeout(()=>res(null),ms))]); }
 
-let localTimer=null, cloudTimer=null, cloudBusy=false, cloudPending=false, booted=false;
+let localTimer=null, booted=false;
 function setSaveBadge(t){ const b=document.getElementById('saveBadge'); if(b) b.textContent=t; }
 let lastSaveLabel='';
-function saveLocalNow(){
-  if(!booted||view==='battle') return;
-  LocalStore.save(serializeGame());
+/* Единственная точка записи: снимок → устройство → облако (та же строка). */
+function writeSave(slot){
+  if(!booted||view==='battle') return false;
+  const str=serializeGame();
+  LocalStore.save(slot,str);
   lastSavedPrint=progressPrint(); syncClosingGuard();
   lastSaveLabel=`день ${day}`;
-  if(!CLOUD_OK) setSaveBadge(`💾 ${lastSaveLabel}`);
-}
-async function saveCloudNow(){
-  if(!booted||!CLOUD_OK||view==='battle') return;
-  if(cloudBusy){ cloudPending=true; return; }
-  cloudBusy=true; setSaveBadge('☁️…');
-  try{ await CloudStore.save(serializeGame()); setSaveBadge(`☁️ ${lastSaveLabel||'✓'}`); }
-  catch(e){ setSaveBadge('☁️✗'); }
-  cloudBusy=false;
-  if(cloudPending){ cloudPending=false; saveCloudNow(); }
+  if(CLOUD_OK){ setSaveBadge('☁️…'); CloudSlots[slot].save(str); } else setSaveBadge(`💾 ${lastSaveLabel}`);
+  return true;
 }
 /* Локально — почти сразу (0.3 с), в облако — реже (4 с тишины), immediate — для важных моментов. */
 /* «Отпечаток» прогресса: если он отличается от сохранённого — есть что терять, и при закрытии спросим подтверждение. */
@@ -2271,13 +2450,14 @@ function syncClosingGuard(){
   window.__morveynDirty=dirty;
 }
 window.addEventListener('beforeunload',e=>{ if(window.__morveynDirty){ e.preventDefault(); e.returnValue=''; } });
+/* Автосохранение: immediate — сразу (утро, плавание, новая игра); иначе пишет только жёсткий режим, с паузой 1 с. */
 function saveSoon(immediate){
   if(!booted) return;
   if(!immediate && !hardMode){ syncClosingGuard(); return; } // обычный режим: только явные точки сохранения
-  clearTimeout(localTimer); localTimer=setTimeout(saveLocalNow,immediate?0:300);
-  if(CLOUD_OK){ clearTimeout(cloudTimer); cloudTimer=setTimeout(saveCloudNow,immediate?50:4000); }
+  clearTimeout(localTimer);
+  if(immediate) writeSave('auto'); else localTimer=setTimeout(()=>writeSave('auto'),1000);
 }
-function flushSaves(){ if(!booted||!hardMode) return; clearTimeout(localTimer); saveLocalNow(); if(CLOUD_OK){ clearTimeout(cloudTimer); saveCloudNow(); } }
+function flushSaves(){ if(!booted||!hardMode) return; clearTimeout(localTimer); writeSave('auto'); }
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flushSaves(); else lastTick=Date.now(); });
 window.addEventListener('pagehide',flushSaves);
 setInterval(()=>{ if(booted) tickPlaytime(); },15000);
@@ -2353,13 +2533,22 @@ function openStats(victory){
 }
 document.getElementById('statsBtn').onclick=()=>{ if(view==='battle') return; closeModal(); openStats(false); };
 
-async function readBestSave(){
-  const local=LocalStore.load();
+function saveInfo(str){ try{ const d=JSON.parse(str); return {savedAt:d.savedAt||0, day:d.day, cont:d.curCont, hard:!!d.hardMode}; }catch(e){ return null; } }
+/* Для каждой ячейки берём более свежую из двух копий (устройство / облако). */
+async function readSlot(slot){
+  const local=LocalStore.load(slot);
   let cloud=null;
-  if(CLOUD_OK){ try{ cloud=await withTimeout(CloudStore.load(),5000); }catch(e){ cloud=null; } }
-  const ts=s=>{ try{ return JSON.parse(s).savedAt||0; }catch(e){ return -1; } };
-  return [local,cloud].filter(Boolean).sort((a,b)=>ts(b)-ts(a));
+  if(CLOUD_OK){ try{ cloud=await withTimeout(CloudSlots[slot].load(),5000); }catch(e){ cloud=null; } }
+  const ok=[local,cloud].filter(x=>x&&saveInfo(x));
+  ok.sort((a,b)=>saveInfo(b).savedAt-saveInfo(a).savedAt);
+  return ok[0]||null;
 }
+async function readAllSlots(){ const [auto,manual]=await Promise.all([readSlot('auto'),readSlot('manual')]); return {auto,manual}; }
+async function readBestSave(){
+  const {auto,manual}=await readAllSlots();
+  return [auto,manual].filter(Boolean).sort((a,b)=>saveInfo(b).savedAt-saveInfo(a).savedAt);
+}
+function clearManualSave(){ LocalStore.clear('manual'); if(CLOUD_OK) CloudSlots.manual.clear(); }
 function updateSaveButtons(){
   const sb=document.getElementById('saveBtn'), lb=document.getElementById('loadBtn');
   if(sb) sb.style.display=hardMode?'none':'';
@@ -2368,30 +2557,45 @@ function updateSaveButtons(){
 document.getElementById('saveBtn').onclick=()=>{
   if(hardMode||view==='battle') return;
   closeModal();
-  saveSoon(true);
   if(view!=='map'){ showView('map'); renderMap(); }
-  setInfo(`💾 Игра сохранена (день ${day}).`);
+  writeSave('manual');
+  setInfo(`💾 Игра сохранена (день ${day}). Утреннее автосохранение эту запись не затрёт.`);
 };
 document.getElementById('loadBtn').onclick=()=>{
   if(hardMode||view==='battle') return;
   closeModal();
   if(view!=='map'){ showView('map'); renderMap(); }
-  setInfo(`📂 Вернуться к последнему сохранению? Всё, что произошло после него, будет потеряно.<br>
-    <button onclick="loadLastSave()">Загрузить</button> <button class="secondary" onclick="setInfo('')">Отмена</button>`);
+  openLoadDialog();
 };
-async function loadLastSave(){
-  setInfo('⏳ Загрузка...');
-  const cands=await readBestSave();
-  for(const c of cands){
-    if(restoreGame(c)){
-      curCity=null; curEncounter=null; currentWallBonus=0;
-      lastSavedPrint=progressPrint(); syncClosingGuard();
-      showView('map'); renderMap(); updateSaveButtons();
-      setInfo(`📂 Загружено сохранение: ${contCfg().emoji} ${contCfg().name}, день ${day}.`);
-      return;
-    }
-  }
-  setInfo('Сохранение не найдено.');
+let loadCache={};
+function fmtSavedAt(ts){
+  const d=new Date(ts), now=new Date(), same=d.toDateString()===now.toDateString();
+  const hm=d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  return same?`сегодня ${hm}`:`${d.toLocaleDateString('ru-RU',{day:'numeric',month:'short'})} ${hm}`;
+}
+async function openLoadDialog(){
+  openModal(`<h2>📂 Загрузка</h2><div class="modalNote">⏳ Читаю сохранения...</div>`);
+  loadCache=await readAllSlots();
+  const row=(slot,label,hint)=>{
+    const str=loadCache[slot], i=str&&saveInfo(str);
+    if(!i) return `<button class="modeBtn secondary" disabled>${label}<small>пусто</small></button>`;
+    const c=CONTINENTS[i.cont]||CONTINENTS[0];
+    return `<button class="modeBtn secondary" onclick="loadSlot('${slot}')">${label}<small>${c.emoji} ${c.name}, день ${i.day} · ${fmtSavedAt(i.savedAt)} · ${hint}</small></button>`;
+  };
+  openModal(`<h2>📂 Загрузка</h2>
+    <div class="modalNote">Всё, что произошло после выбранного сохранения, будет потеряно.</div>
+    ${row('manual','💾 Ручное сохранение','кнопка «Сохранить»')}
+    ${row('auto','🌅 Автосохранение','начало дня')}
+    <button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Отмена</button>`);
+}
+function loadSlot(slot){
+  const str=loadCache[slot];
+  if(!str||!restoreGame(str)){ openModal(`<h2>📂 Загрузка</h2><div class="modalNote">Не удалось прочитать сохранение.</div><button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Закрыть</button>`); return; }
+  closeModal();
+  curCity=null; curEncounter=null; currentWallBonus=0;
+  lastSavedPrint=progressPrint(); syncClosingGuard();
+  showView('map'); renderMap(); updateSaveButtons();
+  setInfo(`📂 Загружено ${slot==='manual'?'ручное сохранение':'автосохранение'}: ${contCfg().emoji} ${contCfg().name}, день ${day}.`);
 }
 
 async function bootGame(){
