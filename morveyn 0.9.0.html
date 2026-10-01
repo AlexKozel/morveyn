@@ -1,0 +1,2423 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Морвейн</title>
+<!-- SDK Telegram Mini Apps: внутри Telegram даёт CloudStorage; вне Telegram (браузер, Android WebView) просто не используется -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg:#1b140d; --panel:#2b2015; --panel2:#241b12; --accent:#d4a72c;
+    --text:#f1e6cf; --muted:#b8a984; --good:#5fae5f; --bad:#b34848; --player:#4d84c4; --enemy:#b34848;
+    box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#f4ecd8; --panel:#fff8ea; --panel2:#eee2c6; --accent:#a5750f; --text:#2b2015; --muted:#6b5c3e;
+    }
+  }
+  html{scroll-padding-top:env(safe-area-inset-top,0px); height:100%;}
+  *{box-sizing:border-box;}
+  body{margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family:'Georgia',ui-serif,serif;
+    display:flex; flex-direction:column; align-items:center; padding:14px 10px 24px;
+    padding-left:calc(10px + env(safe-area-inset-left,0px)); padding-right:calc(10px + env(safe-area-inset-right,0px));}
+  #app{width:100%; display:flex; flex-direction:column; align-items:center;}
+  #mapView,#battleView{width:100%; display:flex; flex-direction:column; align-items:center;}
+  h1{font-size:clamp(15px,3.6vw,19px); margin:2px 0 8px; color:var(--accent);}
+  .sub{color:var(--muted); font-size:12.5px; margin-bottom:10px; text-align:center; max-width:640px;}
+  .hidden{display:none !important;}
+  #hud{width:100%; max-width:680px; background:var(--panel); border:1px solid var(--accent); border-radius:8px;
+    padding:6px 8px 6px 12px; margin-bottom:10px; font-size:13px;}
+  #hud .stat{font-weight:bold;}
+  #hudMain{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
+  #hudMain .grow{flex:1;}
+  #hudMain > span{white-space:nowrap;}
+  #hudMain .iconBtn{padding:4px 10px; font-size:15px; line-height:1;}
+  #hudMore{display:flex; flex-wrap:wrap; gap:6px 14px; font-size:12px; color:var(--muted); border-top:1px dashed rgba(212,167,44,.3);
+    margin-top:6px; padding-top:6px;}
+  #hudMore .stat{color:var(--text);}
+  #controls{width:100%; max-width:680px; margin-top:10px; display:grid; grid-template-columns:repeat(4,1fr); gap:6px;}
+  #controls button{padding:9px 4px; font-size:13px;}
+  #modal{position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:50;
+    padding:calc(16px + env(safe-area-inset-top,0px)) 14px calc(16px + env(safe-area-inset-bottom,0px));}
+  #modalCard{background:var(--panel); border:1px solid var(--accent); border-radius:12px; padding:16px; width:100%; max-width:420px;
+    max-height:100%; overflow-y:auto;}
+  #modalCard h2{margin:0 0 8px; font-size:18px; color:var(--accent);}
+  .menuList{display:flex; flex-direction:column; gap:8px; margin-top:8px;}
+  .menuList button{text-align:left; padding:10px 12px;}
+  .modeBtn{display:block; width:100%; text-align:left; padding:12px; margin-top:8px;}
+  .modeBtn small{display:block; font-weight:normal; font-size:12px; margin-top:3px; opacity:.85;}
+  .modalNote{font-size:13px; color:var(--muted); line-height:1.5;}
+  button{background:var(--accent); color:#1b140d; border:none; border-radius:6px; padding:7px 12px; font-size:13px;
+    font-weight:bold; cursor:pointer; font-family:inherit;}
+  button.secondary{background:var(--panel2); color:var(--text); border:1px solid var(--accent);}
+  button:disabled{opacity:.4; cursor:default;}
+  /* размер сетки и клеток задаёт JS (layoutViewport) под доступное место */
+  #map{display:grid; gap:1px; background:#000; padding:3px; border-radius:10px; border:2px solid var(--accent); --tile:28px;}
+  #map .icon{font-size:calc(var(--tile)*0.62);}
+  #battlefield{display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(6,1fr); gap:3px; box-sizing:border-box;
+    width:100%; max-width:560px; aspect-ratio:8/6; background:var(--panel2); padding:4px; border-radius:10px; border:2px solid var(--accent);}
+  .tile,.cell{position:relative; display:flex; align-items:center; justify-content:center; cursor:default; overflow:hidden;}
+  .cell{background:#3a2e1f; border-radius:4px;}
+  .cell.alt{background:#443624;}
+  .tile.reachable,.cell.reachable{box-shadow:inset 0 0 0 2px var(--good); cursor:pointer;}
+  .tile.modifiable{box-shadow:inset 0 0 0 2px var(--accent); cursor:pointer;}
+  .cell.attackable{box-shadow:inset 0 0 0 2px var(--enemy); cursor:pointer;}
+  .cell.selected{box-shadow:inset 0 0 0 3px gold;}
+  .icon,.unit{font-size:clamp(11px,2.6vw,20px); position:relative; line-height:1;}
+  #battlefield .unit{font-size:var(--bunit,clamp(11px,2.6vw,20px));}
+
+  /* ---------- горизонтальная раскладка: поле слева, колонка управления справа ---------- */
+  body.land{padding-top:calc(10px + env(safe-area-inset-top,0px)); padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));}
+  body.land #titleH1{display:none;}
+  /* #app занимает ровно высоту экрана; правая колонка: панель сверху, кнопки снизу, середина тянется и прокручивается */
+  body.land.v-map #app, body.land.v-battle #app{
+    display:grid; grid-template-columns:auto minmax(0,var(--side,260px)); column-gap:10px; justify-content:center;
+    height:var(--appH,100vh); align-items:start;}
+  body.land.v-map #app{grid-template-rows:auto minmax(0,1fr) auto;}
+  body.land.v-battle #app{grid-template-rows:auto auto auto minmax(0,1fr);}
+  body.land.v-map #mapView, body.land.v-battle #battleView{display:contents;}
+  body.land.v-map #map, body.land.v-battle #battlefield{grid-column:1; grid-row:1 / -1; align-self:start;}
+  body.land.v-map #hud, body.land.v-battle #hud{grid-column:2; grid-row:1; margin:0;}
+  body.land #hudMain{gap:4px 9px; font-size:12.5px; flex-wrap:wrap;}
+  body.land #hudMain .iconBtn{padding:3px 8px;}
+  body.land.v-map #info{grid-column:2; grid-row:2; margin-top:8px; overflow-y:auto; min-height:0; max-height:100%;}
+  body.land.v-map #controls{align-self:end;}
+  body.land.v-battle #log{align-self:stretch;}
+  body.land.v-map #controls{grid-column:2; grid-row:3; grid-template-columns:repeat(2,1fr); margin-top:8px;}
+  body.land.v-battle #spellbar{grid-column:2; grid-row:2; margin:8px 0 0; gap:4px;}
+  body.land.v-battle #spellbar button{font-size:11px; padding:4px 7px;}
+  body.land.v-battle #turnbar{grid-column:2; grid-row:3; margin:8px 0 0; font-size:13px;}
+  body.land.v-battle #log{grid-column:2; grid-row:4; margin-top:8px; height:auto; min-height:0;}
+  body.land.v-map #hud, body.land.v-battle #hud, body.land #info, body.land #controls,
+  body.land #spellbar, body.land #turnbar, body.land #log{max-width:none;}
+  .count-badge{position:absolute; bottom:-6px; right:-8px; background:#000; color:#fff; font-size:9px; padding:1px 4px;
+    border-radius:8px; font-family:sans-serif;}
+  .unit.player .count-badge{background:var(--player);}
+  .unit.enemy .count-badge{background:var(--enemy);}
+  #info,#log{width:100%; max-width:680px; background:var(--panel); border:1px solid var(--accent); border-radius:8px;
+    margin-top:10px; padding:10px 12px; font-size:13px;}
+  #log{height:100px; overflow-y:auto; color:var(--muted); font-size:12.5px;}
+  #log div{margin:2px 0;}
+  #info button{margin:6px 6px 0 0;}
+  #legend{display:flex; flex-wrap:wrap; gap:8px 12px; font-size:12px; color:var(--muted); margin-top:6px;}
+  .swatch{width:12px; height:12px; border-radius:3px; display:inline-block;}
+  #turnbar{width:100%; max-width:560px; background:var(--panel); border:1px solid var(--accent); border-radius:8px;
+    padding:8px 12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; font-size:14px; gap:8px; flex-wrap:wrap;}
+  #spellbar{width:100%; max-width:560px; display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap;}
+  #spellbar button{font-size:12px; padding:6px 9px;}
+  #cityView,#inventoryView,#armyView,#statsView{width:100%; max-width:600px;}
+  .statGrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; margin:10px 0;}
+  .statCell{background:var(--panel2); border:1px solid rgba(212,167,44,.3); border-radius:8px; padding:8px 10px;}
+  .statCell .sv{font-size:19px; font-weight:bold; color:var(--accent);}
+  .statCell .sl{font-size:11.5px; color:var(--muted); margin-top:2px;}
+  .statSection{font-size:13px; color:var(--accent); margin:12px 0 2px; text-transform:uppercase; letter-spacing:.06em;}
+  .funFacts{font-size:13px; line-height:1.55; color:var(--text); margin-top:8px;}
+  #saveBadge{font-size:11px; color:var(--muted);}
+  .cityCard{background:var(--panel); border:1px solid var(--accent); border-radius:10px; padding:14px; margin-bottom:10px;}
+  .cityCard h2{margin:0 0 8px; font-size:18px; color:var(--accent);}
+  .row{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px dashed rgba(212,167,44,.25); font-size:13px;}
+  .row:last-child{border-bottom:none;}
+  .rowbtns{display:flex; gap:4px;}
+  .rowbtns button{padding:4px 8px; font-size:12px;}
+  .armyline{font-size:12.5px; color:var(--muted); margin-top:4px;}
+</style>
+</head>
+<body>
+<h1 id="titleH1">🗺️ Морвейн: Карта мира</h1>
+
+<div id="app">
+<div id="hud">
+  <div id="hudMain">
+    <span class="stat" id="contName">Морвейн</span>
+    <span title="Золото">💰 <span class="stat" id="gold">0</span></span>
+    <span title="Ходы на сегодня">👣 <span class="stat" id="moves">0</span></span>
+    <span title="Лидерство: занято/всего">👥 <span class="stat" id="leadership">0/60</span></span>
+    <span title="День">📅 <span class="stat" id="day">1</span></span>
+    <span class="grow"></span>
+    <button id="hudMoreBtn" class="secondary iconBtn" title="Подробнее">▾</button>
+    <button id="menuBtn" class="secondary iconBtn" title="Меню">☰</button>
+  </div>
+  <div id="hudMore" class="hidden">
+    <span>🧭 Тир земли <span class="stat" id="contTier">1</span></span>
+    <span>🌟 Ур. <span class="stat" id="hlevel">1</span> (<span id="hexp">0</span>/<span id="hexpmax">100</span>)</span>
+    <span>🎖️ <span class="stat" id="rank">Рыцарь</span></span>
+    <span>🔮 Маг. сила <span class="stat" id="magicpower">5</span></span>
+    <span>🗺️ Карта <span class="stat" id="pieces">0/8</span></span>
+    <span>📆 Неделя <span class="stat" id="week">1</span></span>
+    <span id="modeBadge"></span>
+    <span id="saveBadge"></span>
+  </div>
+</div>
+
+<div id="mapView">
+  <div id="map"></div>
+  <div id="info">Выберите клетку рядом с героем.</div>
+</div>
+<div id="legendSrc" class="hidden">
+  <div id="legend">
+    <span><i class="swatch" style="background:#5a7d3a"></i>Равнина</span>
+    <span><i class="swatch" style="background:#2f4a26"></i>Лес (нужна вырубка)</span>
+    <span><i class="swatch" style="background:#5c5044"></i>Горы</span>
+    <span><i class="swatch" style="background:#3a4a2e"></i>Болото</span>
+    <span><i class="swatch" style="background:#c2a878"></i>Пустыня</span>
+    <span><i class="swatch" style="background:#9c8054"></i>Дорога</span>
+    <span><i class="swatch" style="background:#2c5d7a"></i>Вода</span>
+  </div>
+</div>
+
+<div id="battleView" class="hidden">
+  <div id="spellbar"></div>
+  <div id="turnbar"><span class="who" id="turnwho">—</span><span><button id="waitBtn" class="secondary">Ждать</button> <button id="retreatBtn" class="secondary">🏳️ Отступить</button></span></div>
+  <div id="battlefield"></div>
+  <div id="log"></div>
+</div>
+
+<div id="cityView" class="hidden"></div>
+<div id="inventoryView" class="hidden"></div>
+<div id="armyView" class="hidden"></div>
+<div id="statsView" class="hidden"></div>
+
+<div id="controls">
+  <button id="invBtn" class="secondary">🎒 Сумка</button>
+  <button id="armyBtn" class="secondary">👥 Армия</button>
+  <button id="magicBtn" class="secondary">🪄 Магия</button>
+  <button id="nextDayBtn">⏭️ День</button>
+</div>
+</div><!-- /#app -->
+
+<div id="modal" class="hidden"><div id="modalCard"></div></div>
+<!-- кнопки меню живут здесь и переносятся в модальное окно, чтобы их обработчики не терялись -->
+<div id="menuButtons" class="hidden">
+  <div class="menuList" id="menuList">
+    <button id="saveBtn" class="secondary">💾 Сохранить игру</button>
+    <button id="loadBtn" class="secondary">📂 Загрузить последнее сохранение</button>
+    <button id="statsBtn" class="secondary">📊 Летопись похода</button>
+    <button id="journalBtn" class="secondary">📖 Справочник городов</button>
+    <button id="legendBtn" class="secondary">🗺️ Легенда карты</button>
+    <button id="restartBtn" class="secondary">🔄 Новая игра</button>
+    <button id="bugBtn" class="secondary">🐞 Сообщить об ошибке</button>
+  </div>
+</div>
+<div id="gameOverView" class="hidden" style="width:100%;max-width:600px;text-align:center;"></div>
+
+<script>
+/* ================= VERSION / DIAGNOSTICS ================= */
+const GAME_VERSION='0.9.0', GAME_BUILD='2026-10-01';
+// Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
+const FEEDBACK_USERNAME='';
+const recentErrors=[];
+window.addEventListener('error',e=>{ recentErrors.push(`${e.message} @${(e.filename||'').split('/').pop()}:${e.lineno}`); if(recentErrors.length>5) recentErrors.shift(); });
+window.addEventListener('unhandledrejection',e=>{ recentErrors.push('promise: '+String(e.reason&&e.reason.message||e.reason)); if(recentErrors.length>5) recentErrors.shift(); });
+/* ================= UNITS (32, 5 factions) ================= */
+const UNITS={
+  swordsmen:{name:'Мечники',faction:'human',hp:15,dmg:[2,4],def:2,speed:4,emoji:'⚔️',tier:1,leadershipCost:1,upkeep:1},
+  archers:{name:'Лучники',faction:'human',hp:8,dmg:[2,3],def:1,speed:5,emoji:'🏹',ranged:true,tier:2,leadershipCost:2,upkeep:2},
+  pikemen:{name:'Копейщики',faction:'human',hp:12,dmg:[2,4],def:2,speed:4,emoji:'🔱',tier:2,leadershipCost:2,upkeep:2},
+  priests:{name:'Жрецы',faction:'human',hp:10,dmg:[2,5],def:1,speed:5,emoji:'✝️',ranged:true,tier:3,leadershipCost:4,upkeep:4},
+  mages:{name:'Маги',faction:'human',hp:6,dmg:[3,6],def:0,speed:6,emoji:'🧙',ranged:true,tier:3,leadershipCost:4,upkeep:4},
+  knights:{name:'Рыцари',faction:'human',hp:35,dmg:[4,6],def:5,speed:3,emoji:'🛡️',tier:4,leadershipCost:6,upkeep:5},
+  vityaz:{name:'Витязи',faction:'human',hp:45,dmg:[6,9],def:6,speed:5,emoji:'🐎',tier:5,leadershipCost:15,upkeep:12},
+
+  elves:{name:'Эльфы',faction:'nature',hp:9,dmg:[3,4],def:1,speed:6,emoji:'🧝',ranged:true,tier:2,leadershipCost:2,upkeep:2},
+  leshy:{name:'Лешие',faction:'nature',hp:14,dmg:[2,4],def:2,speed:3,emoji:'🌳',tier:2,leadershipCost:2,upkeep:2},
+  druids:{name:'Друиды',faction:'nature',hp:11,dmg:[3,6],def:1,speed:5,emoji:'🔮',ranged:true,tier:3,leadershipCost:4,upkeep:4},
+  centaurs:{name:'Кентавры',faction:'nature',hp:16,dmg:[3,5],def:2,speed:7,emoji:'🏇',tier:3,leadershipCost:4,upkeep:4},
+  treants:{name:'Древни',faction:'nature',hp:55,dmg:[5,9],def:7,speed:2,emoji:'🌲',tier:5,leadershipCost:15,upkeep:12},
+
+  spiders:{name:'Пауки',faction:'beast',hp:6,dmg:[1,3],def:1,speed:6,emoji:'🕷️',tier:1,leadershipCost:1,upkeep:1},
+  boars:{name:'Кабаны',faction:'beast',hp:10,dmg:[2,3],def:1,speed:5,emoji:'🐗',tier:1,leadershipCost:1,upkeep:1},
+  snakes:{name:'Змеи',faction:'beast',hp:7,dmg:[2,4],def:0,speed:6,emoji:'🐍',tier:1,leadershipCost:1,upkeep:1},
+  wolves:{name:'Волки',faction:'beast',hp:10,dmg:[2,4],def:1,speed:7,emoji:'🐺',tier:2,leadershipCost:2,upkeep:2},
+  lions:{name:'Львы',faction:'beast',hp:18,dmg:[4,6],def:2,speed:7,emoji:'🦁',tier:3,leadershipCost:4,upkeep:4},
+  gorillas:{name:'Гориллы',faction:'beast',hp:22,dmg:[4,7],def:3,speed:4,emoji:'🦍',tier:3,leadershipCost:4,upkeep:4},
+  elephants:{name:'Слоны',faction:'beast',hp:60,dmg:[6,10],def:5,speed:3,emoji:'🐘',tier:5,leadershipCost:15,upkeep:12},
+
+  skeletons:{name:'Скелеты',faction:'undead',hp:6,dmg:[1,3],def:1,speed:4,emoji:'💀',tier:1,leadershipCost:1,upkeep:1},
+  zombies:{name:'Зомби',faction:'undead',hp:16,dmg:[2,4],def:1,speed:2,emoji:'🧟',tier:2,leadershipCost:2,upkeep:2},
+  ghosts:{name:'Призраки',faction:'undead',hp:12,dmg:[3,5],def:0,speed:7,emoji:'👻',tier:3,leadershipCost:4,upkeep:4},
+  wraiths:{name:'Тени',faction:'undead',hp:28,dmg:[4,7],def:3,speed:6,emoji:'🌫️',tier:4,leadershipCost:6,upkeep:5},
+  vampires:{name:'Вампиры',faction:'undead',hp:40,dmg:[6,9],def:4,speed:6,emoji:'🧛',tier:5,leadershipCost:15,upkeep:12},
+  liches:{name:'Личи',faction:'undead',hp:50,dmg:[7,12],def:5,speed:4,emoji:'🦴',ranged:true,tier:6,leadershipCost:25,upkeep:20},
+
+  goblins:{name:'Гоблины',faction:'monster',hp:4,dmg:[1,2],def:0,speed:5,emoji:'👺',tier:1,leadershipCost:1,upkeep:1},
+  orcs:{name:'Орки',faction:'monster',hp:15,dmg:[3,5],def:2,speed:4,emoji:'👹',tier:2,leadershipCost:2,upkeep:2},
+  trolls:{name:'Тролли',faction:'monster',hp:38,dmg:[5,8],def:4,speed:3,emoji:'🧌',tier:4,leadershipCost:6,upkeep:5},
+  giants:{name:'Великаны',faction:'monster',hp:58,dmg:[7,11],def:5,speed:3,emoji:'🗻',tier:5,leadershipCost:15,upkeep:12},
+  cyclopes:{name:'Циклопы',faction:'monster',hp:52,dmg:[6,10],def:4,speed:4,emoji:'👁️',tier:5,leadershipCost:15,upkeep:12},
+  demons:{name:'Демоны',faction:'monster',hp:65,dmg:[8,13],def:6,speed:6,emoji:'😈',ranged:true,tier:6,leadershipCost:25,upkeep:20},
+  dragon:{name:'Дракон',faction:'monster',hp:70,dmg:[8,14],def:6,speed:6,emoji:'🐉',tier:6,leadershipCost:40,upkeep:30},
+};
+function unitsByFaction(faction,tier){
+  let pool=Object.entries(UNITS).filter(([k,u])=>u.faction===faction && u.tier===tier).map(([k])=>k);
+  let spread=1;
+  while(pool.length===0 && spread<6){
+    pool=Object.entries(UNITS).filter(([k,u])=>u.faction===faction && Math.abs(u.tier-tier)<=spread).map(([k])=>k);
+    spread++;
+  }
+  return pool;
+}
+function makeRecruitEntry(k){
+  const maxStock=Math.max(5,Math.round(60/UNITS[k].tier));
+  return {key:k,cost:8+UNITS[k].tier*8,maxStock,stock:maxStock};
+}
+function pickN(arr,n,rng){
+  const copy=arr.slice(); const out=[];
+  while(out.length<n && copy.length){ const i=Math.floor(rng()*copy.length); out.push(copy.splice(i,1)[0]); }
+  return out;
+}
+
+const SPELLS=[
+  {key:'heal',name:'Исцеление',cost:80,emoji:'✨',desc:'Лечит 30% отряда в бою',reqMagic:0},
+  {key:'fireball',name:'Огненный шар',cost:120,emoji:'🔥',desc:'30 урона по врагу в бою',reqMagic:0},
+  {key:'haste',name:'Ускорение',cost:60,emoji:'💨',desc:'Даёт доп. ход в бою',reqMagic:5},
+  {key:'multiply',name:'Размножение',cost:100,emoji:'🐣',desc:'+25-50% числа юнитов в отряде',reqMagic:8},
+  {key:'resurrect',name:'Воскрешение',cost:130,emoji:'💫',desc:'Полностью восстанавливает отряд',reqMagic:10},
+  {key:'infection',name:'Зараза',cost:110,emoji:'🦠',desc:'Урон врагу и соседним вражеским отрядам',reqMagic:8},
+];
+const ADV_SPELLS=[
+  {key:'towngate',name:'Переход к городу',cost:100,emoji:'🚪',desc:'Телепорт к своему городу/замку/пещере',reqMagic:5},
+  {key:'givearmy',name:'Дать армию',cost:90,emoji:'🐎',desc:'Призывает случайный отряд бесплатно',reqMagic:8},
+  {key:'quasi',name:'Квази-авторитет',cost:70,emoji:'📈',desc:'+40 к лидерству до конца недели',reqMagic:12},
+  {key:'tornado',name:'Смерч',cost:110,emoji:'🌪️',desc:'Изгоняет Чёрного Колдуна в случайную точку карты',reqMagic:6},
+];
+/* Снаряжение по уровням 1–5. Земля с тиром T продаёт уровни max(1,T)…T+1,
+   плюс один редкий предмет уровня T+2 в одной лавке на всю землю. ID старых предметов сохранены (совместимость сохранений). */
+const ITEMS={
+  // оружие — урон
+  sword_iron:  {name:'Железный меч',slot:'weapon',tier:1,bonus:{dmg:2},cost:150,emoji:'🗡️'},
+  mace_bronze: {name:'Бронзовая булава',slot:'weapon',tier:1,bonus:{dmg:3},cost:220,emoji:'🔨'},
+  sword_steel: {name:'Стальной меч',slot:'weapon',tier:2,bonus:{dmg:4},cost:330,emoji:'⚔️'},
+  sword_flame: {name:'Пламенный клинок',slot:'weapon',tier:3,bonus:{dmg:6},cost:500,emoji:'🔥'},
+  axe_rune:    {name:'Рунный топор',slot:'weapon',tier:4,bonus:{dmg:8,def:1},cost:780,emoji:'🪓'},
+  blade_doom:  {name:'Клинок Погибели',slot:'weapon',tier:5,bonus:{dmg:11},cost:1150,emoji:'🌑'},
+  // броня — защита
+  armor_leather:{name:'Кожаный доспех',slot:'armor',tier:1,bonus:{def:1},cost:120,emoji:'🥋'},
+  armor_chain: {name:'Кольчуга',slot:'armor',tier:2,bonus:{def:2},cost:250,emoji:'⛓️'},
+  armor_plate: {name:'Латные доспехи',slot:'armor',tier:3,bonus:{def:4},cost:460,emoji:'🛡️'},
+  armor_dragon:{name:'Чешуя дракона',slot:'armor',tier:4,bonus:{def:6},cost:760,emoji:'🐉'},
+  armor_eternal:{name:'Латы Вечности',slot:'armor',tier:5,bonus:{def:8,leadership:10},cost:1250,emoji:'✨'},
+  // шлемы — лидерство
+  helm_iron:   {name:'Железный шлем',slot:'helmet',tier:1,bonus:{leadership:5},cost:200,emoji:'⛑️'},
+  helm_centurion:{name:'Шлем сотника',slot:'helmet',tier:2,bonus:{leadership:10},cost:340,emoji:'🪖'},
+  helm_horned:{name:'Рогатый шлем',slot:'helmet',tier:3,bonus:{leadership:16,dmg:1},cost:520,emoji:'🐂'},
+  helm_crown:  {name:'Корона полководца',slot:'helmet',tier:4,bonus:{leadership:25},cost:880,emoji:'👑'},
+  helm_lord:   {name:'Венец Владыки',slot:'helmet',tier:5,bonus:{leadership:40},cost:1400,emoji:'💠'},
+  // амулеты и обувь — золото и ходы
+  amulet_gold: {name:'Амулет золота',slot:'amulet',tier:1,bonus:{goldPerWeek:20},cost:250,emoji:'💛'},
+  amulet_speed:{name:'Сапоги-скороходы',slot:'amulet',tier:2,bonus:{movesPerDay:2},cost:300,emoji:'👢'},
+  amulet_treasurer:{name:'Талисман казначея',slot:'amulet',tier:3,bonus:{goldPerWeek:50},cost:560,emoji:'🪙'},
+  boots_winged:{name:'Крылатые сапоги',slot:'amulet',tier:4,bonus:{movesPerDay:3,def:1},cost:820,emoji:'🪽'},
+  amulet_world:{name:'Сердце мира',slot:'amulet',tier:5,bonus:{goldPerWeek:80,movesPerDay:2},cost:1500,emoji:'🌍'},
+};
+const BONUS_LABEL={dmg:'урон',def:'защита',leadership:'лидерство',goldPerWeek:'💰/нед',movesPerDay:'ход/день'};
+function fmtBonus(it){ return Object.entries(it.bonus).map(([k,v])=>`+${v} ${BONUS_LABEL[k]||k}`).join(', '); }
+function tierStars(t){ return '★'.repeat(t); }
+/* Уровни заклинаний: земля с тиром T продаёт заклинания уровня ≤ T+1. */
+const SPELL_TIER={heal:1,fireball:1,haste:1,towngate:1,tornado:1,infection:2,givearmy:2,multiply:2,resurrect:3,quasi:3};
+function allSpells(){ return [...SPELLS,...ADV_SPELLS]; }
+function spellByKey(k){ return allSpells().find(x=>x.key===k); }
+const SLOTS=['weapon','armor','helmet','amulet'];
+const RANKS=[
+  {name:'Рыцарь',leadership:60},{name:'Командир',leadership:100},{name:'Маршал',leadership:150},
+  {name:'Генерал',leadership:210},{name:'Магистр войны',leadership:280},{name:'Архонт',leadership:360},
+  {name:'Владыка земель',leadership:450},{name:'Верховный правитель',leadership:550},
+];
+
+/* ================= WORLD GENERATION ================= */
+const ROWS=60, COLS=80, MOVE_BUDGET=10;
+let VIEW_ROWS=9, VIEW_COLS=13; // пересчитываются layoutViewport() под экран
+const TERRAIN={
+  g:{cost:1,color:'#5a7d3a'}, f:{cost:Infinity,color:'#2f4a26'}, m:{cost:Infinity,color:'#5c5044'},
+  s:{cost:3,color:'#3a4a2e'}, d:{cost:2,color:'#c2a878'}, w:{cost:Infinity,color:'#2c5d7a'}, r:{cost:1,color:'#9c8054'},
+};
+const WORKERS={
+  lumberjack:{name:'Лесоруб',emoji:'🪓',cost:40,clears:'f',desc:'Вырубает лес'},
+  carpenter:{name:'Плотник',emoji:'🔨',cost:60,clears:'w',desc:'Строит мосты через воду'},
+  stonemason:{name:'Камнетёс',emoji:'⛏️',cost:80,clears:'m',desc:'Разрушает скалы'},
+};
+let workers={lumberjack:2,carpenter:1,stonemason:0};
+let hardMode=false, gameOverPermanent=false;
+const RITUAL_ITEMS={cup:{name:'Чаша',emoji:'🏆'},wand:{name:'Жезл',emoji:'🪄'},dagger:{name:'Кинжал',emoji:'🗡️'},pentacle:{name:'Пентакль',emoji:'🔯'}};
+let ritualItems={cup:false,wand:false,dagger:false,pentacle:false};
+/* Каждый ритуальный предмет: +2 к магической силе навсегда. Полный набор из четырёх: ещё +10 к лидерству.
+   ritualGranted/ritualSetDone помнят, какие бонусы уже выданы (и переводят старые сохранения). */
+const RITUAL_MAGIC=2, RITUAL_SET_LEADERSHIP=10;
+let ritualGranted=0, ritualSetDone=false;
+function ritualCount(){ return Object.values(ritualItems).filter(Boolean).length; }
+function applyRitualBonuses(){
+  let msg='';
+  while(ritualGranted<ritualCount()){ heroMagicPower+=RITUAL_MAGIC; ritualGranted++; }
+  if(ritualCount()>=4 && !ritualSetDone){ bonusLeadership+=RITUAL_SET_LEADERSHIP; ritualSetDone=true; msg=` Полный ритуальный набор собран: +${RITUAL_SET_LEADERSHIP} к лидерству!`; }
+  return msg;
+}
+let governorWage=0;
+function mulberry32(seed){
+  return function(){
+    seed|=0; seed=seed+0x6D2B79F5|0;
+    let t=Math.imul(seed^seed>>>15,1|seed);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return ((t^t>>>14)>>>0)/4294967296;
+  };
+}
+function terrainAt(r,c,P){
+  const elev=Math.sin(r*0.35*P.f[0]+P.ph[0])+Math.cos(c*0.3*P.f[1]+P.ph[1])+Math.sin((r+c)*0.18*P.f[2]+P.ph[2])+Math.cos((r-c)*0.22*P.f[3]+P.ph[3]);
+  const moist=Math.cos(r*0.25*P.f[4]+P.ph[4])+Math.sin(c*0.33*P.f[5]+P.ph[5]);
+  const L=P.land;
+  if(elev>L.mount) return 'm'; if(elev<L.water) return 'w'; if(elev<L.swamp) return 's';
+  if(moist>L.forest) return 'f'; if(moist<L.desert) return 'd'; return 'g';
+}
+function borderNoise(r,c){ return (Math.sin(r*0.5)+Math.cos(c*0.5))/2; }
+function genTerrainGrid(P){
+  const grid=[];
+  for(let r=0;r<ROWS;r++){ const row=[]; for(let c=0;c<COLS;c++) row.push(terrainAt(r,c,P)); grid.push(row); }
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const edgeDist=Math.min(r,c,ROWS-1-r,COLS-1-c);
+    const thick=borderNoise(r,c)>0?2:1;
+    if(edgeDist<thick) grid[r][c]='w';
+  }
+  return grid;
+}
+let terrainGrid=[];
+function tch(r,c){ return terrainGrid[r][c]; }
+function adjacent(r,c){ return Math.max(Math.abs(hero.row-r),Math.abs(hero.col-c))===1; }
+function chebyshev(a,b){ return Math.max(Math.abs(a.r-b.r),Math.abs(a.c-b.c)); }
+function floodFill(sr,sc){
+  const seen=new Set(); const q=[[sr,sc]]; seen.add(sr+','+sc);
+  while(q.length){
+    const [r,c]=q.shift();
+    for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]){
+      const nr=r+dr,nc=c+dc;
+      if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+      if(terrainGrid[nr][nc]==='w') continue;
+      const k=nr+','+nc; if(seen.has(k)) continue;
+      seen.add(k); q.push([nr,nc]);
+    }
+  }
+  return seen;
+}
+function findNearestBuildable(r,c){
+  const buildable=new Set(['g','d','s','r']);
+  const seen=new Set([r+','+c]); const q=[[r,c]];
+  while(q.length){
+    const [cr,cc]=q.shift();
+    if(buildable.has(terrainGrid[cr][cc])) return {r:cr,c:cc};
+    for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]){
+      const nr=cr+dr,nc=cc+dc;
+      if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+      const k=nr+','+nc; if(seen.has(k)) continue;
+      seen.add(k); q.push([nr,nc]);
+    }
+  }
+  return {r,c};
+}
+function hasWaterNeighbor(r,c){
+  for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]){
+    const nr=r+dr,nc=c+dc;
+    if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+    if(terrainGrid[nr][nc]==='w') return true;
+  }
+  return false;
+}
+function carveRoad(r0,c0,r1,c1){
+  let r=r0,c=c0;
+  while(r!==r1){ r+=Math.sign(r1-r); if(terrainGrid[r][c]!=='w') terrainGrid[r][c]='r'; }
+  while(c!==c1){ c+=Math.sign(c1-c); if(terrainGrid[r][c]!=='w') terrainGrid[r][c]='r'; }
+}
+/* ================= CONTINENTS =================
+   tier 0..4 — сдвигает тиры гарнизонов/логов, множит численность врагов и золото.
+   land — пороги рельефа (характер земли). */
+const CONTINENTS=[
+  {name:'Морвейн',emoji:'🌿',tier:0,master:'Хозяин Морвейна',
+   land:{mount:1.8,water:-1.95,swamp:-1.6,forest:0.7,desert:-1.1},
+   cities:['Гринвуд','Светозар','Ручейск','Дубрава','Полынный'],
+   cityFactions:['human','nature','beast','human','nature'],
+   castleFactions:['monster','undead','beast'],
+   lords:['Лорд Гром','Леди Ворона','Барон Тлен','Ведьма Скверна','Граф Холод','Вождь Кремень','Маг Забвения'],
+   caves:['goblins','orcs','trolls','cyclopes','snakes']},
+  {name:'Сарнаг',emoji:'🏜️',tier:1,master:'Султан Сарнага',
+   land:{mount:1.9,water:-2.05,swamp:-1.85,forest:1.2,desert:-0.3},
+   cities:['Зной','Караван-Таш','Оазис','Медный Двор','Суховей'],
+   cityFactions:['beast','human','beast','nature','human'],
+   castleFactions:['monster','beast'],
+   lords:['Эмир Пекло','Шейх Скорпион','Вдова Барханов','Хан Кости','Визирь Мираж','Бей Суховей','Жрица Песков'],
+   caves:['snakes','orcs','cyclopes','goblins','trolls']},
+  {name:'Хрустальный Бор',emoji:'❄️',tier:2,master:'Ледяная Королева',
+   land:{mount:1.5,water:-1.9,swamp:-1.7,forest:0.3,desert:-1.8},
+   cities:['Инейград','Сосновец','Хрусталь','Вьюжин','Кедровый'],
+   cityFactions:['nature','nature','human','beast','nature'],
+   castleFactions:['undead','monster'],
+   lords:['Ярл Стужа','Дева Метели','Граф Иней','Шаман Пурги','Барон Наст','Ведьма Полыньи','Князь Льда'],
+   caves:['trolls','cyclopes','orcs','goblins','snakes']},
+  {name:'Пепелище',emoji:'🌋',tier:3,master:'Огненный Тиран',
+   land:{mount:1.3,water:-2.0,swamp:-1.55,forest:1.1,desert:-0.6},
+   cities:['Угольск','Серный Ключ','Пеплов','Горнило','Шлаковый'],
+   cityFactions:['human','beast','monster','human','undead'],
+   castleFactions:['monster','undead'],
+   lords:['Лорд Пламя','Кузнец Рока','Демонесса Жар','Вождь Магмы','Граф Сажа','Пиромант Искр','Палач Горна'],
+   caves:['trolls','cyclopes','orcs','goblins','snakes']},
+  {name:'Тёмный Удел',emoji:'🌑',tier:4,master:'Король-Лич',
+   land:{mount:1.7,water:-1.9,swamp:-1.3,forest:0.8,desert:-1.3},
+   cities:['Мглистый','Погост','Сумрак','Чёрный Брод','Вороний'],
+   cityFactions:['undead','monster','undead','human','monster'],
+   castleFactions:['undead','monster'],
+   lords:['Некромант Мор','Дама Тлена','Рыцарь Смерти','Граф Нетленный','Ведьма Склепа','Князь Теней','Страж Могил'],
+   caves:['cyclopes','trolls','orcs','snakes','goblins']},
+];
+const RANK_THRESHOLDS=[0,2,4,7,11,16,22,28]; // захвачено замков всего (по всем землям) для RANKS[i]
+let worlds=[], curCont=0, unlocked=[true,false,false,false,false];
+function contCfg(i){ return CONTINENTS[i===undefined?curCont:i]; }
+function contTier(i){ return contCfg(i).tier; }
+function goldMult(i){ return 1+0.5*contTier(i); }
+function foeMult(i){ return 1+0.35*contTier(i); }
+function makeCaveEntry(k,rng){
+  const base=8+UNITS[k].tier*8;
+  const cost=Math.round(base*(1.15+rng()*0.10));
+  const stock=Math.max(10,Math.round(80/UNITS[k].tier));
+  return {key:k,cost,maxStock:stock,stock,noRestock:true};
+}
+
+let hero, CITY1, pois, worldSeed=Date.now();
+function terrainParams(rng,cfg){
+  const ph=[], f=[];
+  for(let i=0;i<6;i++){ ph.push(rng()*Math.PI*2); f.push(0.85+rng()*0.3); }
+  return {ph,f,land:cfg.land};
+}
+function landCount(){ let n=0; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++) if(terrainGrid[r][c]!=='w') n++; return n; }
+/* Генерирует континент ci в глобальные terrainGrid/pois/sorcerer/CITY1 и возвращает объект мира. */
+function generateWorld(ci){
+  const cfg=CONTINENTS[ci], T=cfg.tier;
+  const rng=mulberry32(worldSeed+ci*7919);
+  // перебираем несколько сидов рельефа: нужна большая связная суша вокруг столицы
+  let best=null;
+  for(let attempt=0;attempt<8;attempt++){
+    terrainGrid=genTerrainGrid(terrainParams(rng,cfg));
+    const h=findNearestBuildable(Math.floor(ROWS/2),Math.floor(COLS/2));
+    const rs=floodFill(h.r,h.c);
+    const score=rs.size/Math.max(1,landCount());
+    if(!best||rs.size>best.size) best={grid:terrainGrid,size:rs.size};
+    if(rs.size>=1500 && score>0.6) break;
+  }
+  terrainGrid=best.grid;
+  const home=findNearestBuildable(Math.floor(ROWS/2),Math.floor(COLS/2));
+  CITY1={r:home.r,c:home.c};
+  const reach=floodFill(home.r,home.c);
+  const buildable=new Set(['g','d','s','r']);
+  const wide=new Set(['g','d','s','r','f','m']);
+  const placed=[home];
+  function farEnough(p,minDist){ return placed.every(q=>chebyshev(p,q)>=minDist); }
+  function candidatesFrom(allowed){
+    const arr=[]; reach.forEach(k=>{ const [r,c]=k.split(',').map(Number); if(allowed.has(terrainGrid[r][c])) arr.push({r,c}); });
+    for(let i=arr.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; }
+    return arr;
+  }
+  function place(allowed,minDist,extra){
+    for(const p of candidatesFrom(allowed)){
+      if(!farEnough(p,minDist)) continue;
+      if(extra && !extra(p)) continue;
+      placed.push(p); return p;
+    }
+    return null;
+  }
+  const maxDist=Math.max(ROWS,COLS)/2;
+  function difficultyOf(p){ return Math.min(1,chebyshev(p,home)/maxDist); }
+
+  const newPois=[];
+  // 5 cities (peaceful hubs)
+  const cityPositions=[home];
+  for(let i=0;i<4;i++){ const p=place(buildable,10); if(p) cityPositions.push(p); }
+  cityPositions.forEach((p,i)=>{
+    const faction=cfg.cityFactions[i%cfg.cityFactions.length];
+    const lo=Math.min(5,1+T), pool1=unitsByFaction(faction,lo), pool2=unitsByFaction(faction,lo+1);
+    const picks=pickN([...new Set([...pool1,...pool2])],2,rng);
+    newPois.push({r:p.r,c:p.c,type:'city',name:cfg.cities[i],emoji:i===0?'🏰':'🏘️',tax:Math.round((8+Math.floor(rng()*8))*goldMult(ci)),
+      recruit:picks.map(k=>makeRecruitEntry(k))});
+  });
+
+  // 8 castles
+  const castlePositions=[];
+  for(let i=0;i<8;i++){ const p=place(buildable,9); if(p) castlePositions.push(p); }
+  let landLordIdx=0,maxD=-1;
+  castlePositions.forEach((p,i)=>{ const d=chebyshev(p,home); if(d>maxD){maxD=d;landLordIdx=i;} });
+  castlePositions.forEach((p,i)=>{
+    const isLord=(i===landLordIdx);
+    const diff=difficultyOf(p);
+    const tier=Math.min(6,Math.min(5,1+T)+Math.round(diff*3)+(isLord?1:0));
+    const faction=cfg.castleFactions[Math.floor(rng()*cfg.castleFactions.length)];
+    let keys;
+    if(isLord){
+      const elitePool=Object.entries(UNITS).filter(([k,u])=>u.tier>=5).map(([k])=>k);
+      keys=pickN(elitePool,3,rng);
+    } else {
+      keys=pickN([...new Set([...unitsByFaction(faction,tier),...unitsByFaction(faction,Math.max(1,tier-1))])],2,rng);
+    }
+    if(keys.length===0) keys.push('goblins');
+    const garrison=keys.map((k,gi)=>({key:k,count:Math.max(2,Math.round((isLord?36:24)*foeMult(ci)/(UNITS[k].tier+gi)))}));
+    const wallBase=Math.round((80+tier*35)*(1+0.3*T));
+    const recruit=pickN([...new Set([...unitsByFaction(faction,Math.max(1,tier-1)),...unitsByFaction(faction,tier)])],2,rng).map(k=>makeRecruitEntry(k));
+    if(isLord){
+      newPois.push({
+        r:p.r,c:p.c,type:'governor',name:'Хозяин Земли',emoji:'👑',owner:'enemy',
+        lord:cfg.master,
+        wallHp:Math.round(wallBase*1.6),wallMax:Math.round(wallBase*1.6),
+        garrison,recruit,rewardClaimed:false,contractsRequired:7,
+      });
+    } else {
+      newPois.push({
+        r:p.r,c:p.c,type:'castle',name:`Замок №${i+1}`,emoji:'🏯',owner:'enemy',
+        lord:cfg.lords[i%cfg.lords.length],
+        wallHp:wallBase,wallMax:wallBase,garrison,recruit,
+      });
+    }
+  });
+
+  // ports (need water neighbour)
+  for(let i=0;i<3;i++){ const p=place(buildable,6,pp=>hasWaterNeighbor(pp.r,pp.c)); if(p) newPois.push({r:p.r,c:p.c,type:'port',name:'Пристань '+(i+1),emoji:'⚓'}); }
+  if(!newPois.some(q=>q.type==='port')){
+    // гарантированная пристань: иначе с этой земли нельзя уплыть
+    const cand=candidatesFrom(buildable).find(pp=>hasWaterNeighbor(pp.r,pp.c)&&!placed.some(q=>q.r===pp.r&&q.c===pp.c));
+    if(cand){ placed.push(cand); newPois.push({r:cand.r,c:cand.c,type:'port',name:'Пристань 1',emoji:'⚓'}); }
+  }
+
+  // hand-placed quest pair: altar (wizard-quest) + dragon nest (guardian lair), reasonably far apart
+  const altarSpot=place(wide,5) || {r:home.r,c:Math.min(COLS-2,home.c+15)};
+  newPois.push({r:altarSpot.r,c:altarSpot.c,type:'altar',name:'Древний алтарь',emoji:'📜'});
+  const nestSpot=place(wide,5) || {r:home.r,c:Math.max(1,home.c-15)};
+  newPois.push({r:nestSpot.r,c:nestSpot.c,type:'lair',name:'Драконье гнездо',emoji:'🐉',enemies:[{key:'orcs',count:Math.round(4*foeMult(ci))},{key:'dragon',count:1+Math.floor(T/2)}]});
+
+  // caves (fixed-stock exclusive recruitment, no fight required)
+  for(let i=0;i<2;i++){
+    const p=place(buildable,7);
+    if(p){
+      const picks=pickN(cfg.caves,2,rng);
+      newPois.push({r:p.r,c:p.c,type:'cave',name:'Пещера'+(i?' Вторая':' Первая'),emoji:'🕳️',isCave:true,
+        recruit:picks.map(k=>makeCaveEntry(k,rng))});
+    }
+  }
+  // mercenary camps (one random unit stack, disappears when bought out)
+  const allUnitKeys=Object.keys(UNITS);
+  for(let i=0;i<3;i++){
+    const p=place(buildable,6);
+    if(p){
+      const k=allUnitKeys[Math.floor(rng()*allUnitKeys.length)];
+      const stock=Math.max(5,Math.round(40/UNITS[k].tier));
+      newPois.push({r:p.r,c:p.c,type:'camp',name:'Лагерь наёмников',emoji:'⛺',isCamp:true,
+        recruit:[{key:k,cost:8+UNITS[k].tier*8,maxStock:stock,stock,noRestock:true}]});
+    }
+  }
+  // chests
+  for(let i=0;i<20;i++){ const p=place(wide,3); if(p) newPois.push({r:p.r,c:p.c,type:'chest',name:'Сундук',emoji:'🎁',goldBase:Math.round((80+Math.floor(rng()*150))*goldMult(ci))}); }
+  // scrolls
+  for(let i=0;i<3;i++){ const p=place(wide,3); if(p) newPois.push({r:p.r,c:p.c,type:'scroll',name:'Древний свиток',emoji:'📃'}); }
+  // wandering wizard: relocates after every meeting, each meeting grants Magic Power
+  for(let i=0;i<1;i++){
+    const p=place(wide,3);
+    if(p) newPois.push({r:p.r,c:p.c,type:'wizard',name:'Странствующий волшебник',emoji:'🧙‍♂️'});
+  }
+  // pyramid: guard fight -> leadership check -> free elite troops + ritual item, or guards rebel
+  for(let i=0;i<1;i++){
+    const p=place(wide,3);
+    if(p){
+      const elitePool=Object.entries(UNITS).filter(([k,u])=>u.tier>=5).map(([k])=>k);
+      const guardKeys=pickN(elitePool,2,rng);
+      const guardEnemies=guardKeys.map(k=>({key:k,count:Math.round((3+Math.floor(rng()*3))*foeMult(ci))}));
+      const rewardKeys=pickN(elitePool,2,rng);
+      const reward=rewardKeys.map(k=>({key:k,count:2+Math.floor(rng()*3)}));
+      const ritualKeys=Object.keys(RITUAL_ITEMS);
+      const ritualItem=ritualKeys[Math.floor(rng()*ritualKeys.length)];
+      newPois.push({r:p.r,c:p.c,type:'pyramid',name:'Пирамида',emoji:'🔺',enemies:guardEnemies,reward,ritualItem});
+    }
+  }
+  // waystones
+  for(let i=0;i<8;i++){ const p=place(wide,3); if(p){ const gold=rng()<0.5; newPois.push({r:p.r,c:p.c,type:'waystone',name:'Придорожный камень',emoji:'🪨',reward:gold?{type:'gold',value:Math.round((10+Math.floor(rng()*16))*goldMult(ci))}:{type:'exp',value:Math.round((5+Math.floor(rng()*11))*goldMult(ci))}}); } }
+  // wild lairs
+  const lairFactions=['beast','monster','undead','beast','monster'];
+  for(let i=0;i<5;i++){
+    const p=place(wide,3);
+    if(p){
+      const diff=difficultyOf(p); const tier=Math.max(1,Math.min(6,1+T+Math.round(diff*3)));
+      const faction=lairFactions[i%lairFactions.length];
+      const keys=pickN(unitsByFaction(faction,tier),1,rng);
+      const key=keys[0]||'goblins';
+      const roaming=i%2===0;
+      newPois.push({r:p.r,c:p.c,type:'lair',name:'Логово '+UNITS[key].name.toLowerCase(),emoji:UNITS[key].emoji,enemies:[{key,count:Math.round((6+Math.floor(rng()*8))*foeMult(ci))}],roaming,aggroRadius:roaming?5:0});
+    }
+  }
+  // the Black Sorcerer: relentlessly pursues the hero, no radius limit
+  const sorcererStart=place(wide,10) || {r:Math.max(1,home.r-15),c:home.c};
+  sorcerer={r:sorcererStart.r,c:sorcererStart.c,active:true};
+
+  pois=newPois;
+  const arrivalPort=newPois.find(q=>q.type==='port');
+  // roads from home to every city and castle
+  cityPositions.forEach(p=>carveRoad(home.r,home.c,p.r,p.c));
+  castlePositions.forEach(p=>carveRoad(home.r,home.c,p.r,p.c));
+  // keep the sunken/port tiles etc as generated; sanitize object tiles to passable ground (except altar/nest which may sit anywhere walkable already since 'wide' allows f/m)
+  pois.forEach(p=>{ if(['city','castle','port','cave','camp'].includes(p.type)) terrainGrid[p.r][p.c]='g'; });
+  ensurePoiAccess(home,pois);
+  assignShops(pois,T,rng);
+  return {terrainGrid,pois,sorcerer,CITY1,visited:{},mapPieces:0,landComplete:false,questState:'available',
+    arrival:arrivalPort?{r:arrivalPort.r,c:arrivalPort.c}:{r:home.r,c:home.c}};
+}
+/* ---------- Доступность объектов ----------
+   Дейкстра от столицы: проходимая клетка 0, лес 1, горы 3 (предпочитаем путь через лес), вода — стена.
+   Для каждого объекта идём по найденному пути обратно и расчищаем препятствия.
+   Мелким наградам можно оставить не больше одной клетки ЛЕСА (работа для Лесоруба), гор — никогда. */
+const LOOSE_POI=new Set(['chest','scroll','waystone']);
+function obstacleCost(t){ return t==='w'?Infinity:(t==='f'?1:(t==='m'?3:0)); }
+function obstacleDijkstra(sr,sc){
+  const INF=1e9, N=ROWS*COLS, dist=new Array(N).fill(INF), prev=new Int32Array(N).fill(-1);
+  const buckets=[[sr*COLS+sc]]; dist[sr*COLS+sc]=0;
+  for(let b=0;b<buckets.length;b++){
+    const bucket=buckets[b]; if(!bucket) continue;
+    for(let i=0;i<bucket.length;i++){
+      const id=bucket[i]; if(dist[id]!==b) continue;
+      const r=(id/COLS)|0, c=id%COLS;
+      for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]){
+        const nr=r+dr,nc=c+dc; if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+        const w=obstacleCost(terrainGrid[nr][nc]); if(w===Infinity) continue;
+        const nid=nr*COLS+nc, nd=b+w;
+        if(nd<dist[nid]){ dist[nid]=nd; prev[nid]=id; (buckets[nd]||(buckets[nd]=[])).push(nid); }
+      }
+    }
+  }
+  return {dist,prev};
+}
+function ensurePoiAccess(home,pois){
+  pois.forEach(p=>{ if(terrainGrid[p.r][p.c]==='f'||terrainGrid[p.r][p.c]==='m') terrainGrid[p.r][p.c]='g'; });
+  const carve=(list,allowForest)=>{
+    const {prev}=obstacleDijkstra(home.r,home.c);
+    list.forEach(p=>{
+      let id=prev[p.r*COLS+p.c], spare=allowForest;
+      // идём от объекта к столице; первая встреченная клетка леса может остаться «задачкой»
+      while(id!==-1){
+        const r=(id/COLS)|0, c=id%COLS, t=terrainGrid[r][c];
+        if(t==='f'&&spare>0){ spare--; }
+        else if(t==='f'||t==='m'){ terrainGrid[r][c]='g'; }
+        id=prev[id];
+      }
+    });
+  };
+  carve(pois.filter(p=>!LOOSE_POI.has(p.type)),0);
+  carve(pois.filter(p=>LOOSE_POI.has(p.type)),1);
+}
+/* ---------- Ассортимент городов ----------
+   В каждом городе есть найм и рынок. Остальное распределяется:
+   лавка заклинаний ~3 города из 5 (3–4 заклинания), оружейная ~3 из 5 (2–4 предмета), гильдия работников 2–3 города.
+   Гарантии: каждое разрешённое на земле заклинание продаётся хотя бы в одном городе; каждый слот снаряжения — хотя бы в одной оружейной;
+   каждый работник — хотя бы в одной гильдии; в столице всегда есть Лесоруб. */
+function shuffleRng(arr,rng){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function distribute(goods,shopCount,minEach,maxEach,rng,mustCover){
+  // mustCover — товары, которые обязаны попасть хотя бы в одну лавку; раскладываем их по кругу, потом добиваем случайными
+  const shops=Array.from({length:shopCount},()=>[]);
+  shuffleRng(mustCover,rng).forEach((g,i)=>{ const sh=shops[i%shopCount]; if(!sh.includes(g)) sh.push(g); });
+  shops.forEach(sh=>{
+    const target=Math.min(goods.length, minEach+Math.floor(rng()*(maxEach-minEach+1)));
+    for(const g of shuffleRng(goods,rng)){ if(sh.length>=target) break; if(!sh.includes(g)) sh.push(g); }
+  });
+  return shops;
+}
+function assignShops(worldPois,T,rng){
+  const cities=worldPois.filter(p=>p.type==='city'); const n=cities.length; if(!n) return;
+  const idx=[...Array(n).keys()];
+  const pickCities=(k,forceCapital)=>{ let c=shuffleRng(idx,rng).slice(0,Math.min(k,n)); if(forceCapital&&!c.includes(0)){ c[c.length-1]=0; } return c; };
+  // заклинания
+  const spellTierMax=Math.min(3,T+1);
+  const spells=allSpells().map(s=>s.key).filter(k=>SPELL_TIER[k]<=spellTierMax);
+  const spellCities=pickCities(3,false);
+  const spellShops=distribute(spells,spellCities.length,3,4,rng,spells);
+  // снаряжение
+  const lo=Math.max(1,T), hi=Math.min(5,T+1);
+  const items=Object.keys(ITEMS).filter(id=>ITEMS[id].tier>=lo&&ITEMS[id].tier<=hi);
+  const perSlot=SLOTS.map(sl=>{ const c=items.filter(id=>ITEMS[id].slot===sl); return c[Math.floor(rng()*c.length)]; }).filter(Boolean);
+  const armoryCities=pickCities(3,false);
+  const itemShops=distribute(items,armoryCities.length,2,4,rng,perSlot);
+  const rarePool=Object.keys(ITEMS).filter(id=>ITEMS[id].tier===Math.min(5,T+2)&&T+2<=5);
+  const rare=rarePool.length?rarePool[Math.floor(rng()*rarePool.length)]:null;
+  const rareShop=rare?Math.floor(rng()*itemShops.length):-1;
+  // гильдии работников: столица + 1–2 города
+  const wkeys=Object.keys(WORKERS);
+  let guildCities=[0,...shuffleRng(idx.filter(i=>i!==0),rng).slice(0,1+Math.floor(rng()*2))];
+  const guildShops=distribute(wkeys,guildCities.length,1,2,rng,wkeys);
+  if(!guildShops[0].includes('lumberjack')) guildShops[0].unshift('lumberjack');
+  cities.forEach((c,i)=>{
+    const si=spellCities.indexOf(i), ai=armoryCities.indexOf(i), gi=guildCities.indexOf(i);
+    c.shop={
+      spells: si>=0?allSpells().map(s=>s.key).filter(k=>spellShops[si].includes(k)):[],
+      items: ai>=0?Object.keys(ITEMS).filter(id=>itemShops[ai].includes(id)):[],
+      workers: gi>=0?wkeys.filter(w=>guildShops[gi].includes(w)):[],
+      rare: (ai>=0&&ai===rareShop)?rare:null
+    };
+    if(c.shop.rare && !c.shop.items.includes(rare)) c.shop.items.push(rare);
+    // если город остался совсем без лавок — даём ему гильдию с одним случайным работником
+    if(!c.shop.spells.length&&!c.shop.items.length&&!c.shop.workers.length) c.shop.workers=[wkeys[Math.floor(rng()*wkeys.length)]];
+    c.shop.title=cityTitle(c.shop);
+  });
+}
+function cityTitle(sh){
+  const kinds=(sh.spells.length?1:0)+(sh.items.length?1:0)+(sh.workers.length?1:0);
+  if(kinds>=3) return '🏛️ торговая столица края';
+  if(sh.spells.length&&sh.items.length) return '⚖️ торговый город';
+  if(sh.spells.length) return '🔮 город магов';
+  if(sh.items.length) return '⚒️ кузнечный город';
+  return '👷 город мастеров';
+}
+
+/* Переключение текущей земли: сохраняем примитивы текущего мира, подгружаем целевой (генерация — лениво, при первом визите). */
+function stashWorld(){
+  const w=worlds[curCont]; if(!w) return;
+  Object.assign(w,{terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState});
+}
+function loadWorld(i){
+  stashWorld();
+  if(!worlds[i]) worlds[i]=generateWorld(i);
+  const w=worlds[i]; curCont=i;
+  ({terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState}=w);
+  return w;
+}
+function allPois(){ stashWorld(); return worlds.filter(Boolean).flatMap(w=>w.pois); }
+
+/* ================= GAME STATE ================= */
+let gold=150, day=1, week=1, movesLeft=MOVE_BUDGET, visited={};
+let mapPieces=0, questState='available', landComplete=false, hasShip=false, bonusLeadership=0;
+let heroLevel=1, heroExp=0, lastBattleEnemyPower=0, heroMagicPower=5;
+let quasiExpireWeek=0, quasiBonus=0;
+let sorcerer=null;
+let equipment={weapon:null,armor:null,helmet:null,amulet:null};
+let inventory=[];
+let army=[
+  {id:1,key:'swordsmen',hp:150,max:150,zone:'active'},
+  {id:2,key:'archers',hp:64,max:64,zone:'active'},
+  {id:3,key:'knights',hp:105,max:105,zone:'active'},
+  {id:4,key:'mages',hp:12,max:12,zone:'active'},
+];
+function activeStacks(){ return army.filter(a=>a.zone==='active'&&a.hp>0); }
+function reserveStacks(){ return army.filter(a=>a.zone==='reserve'&&a.hp>0); }
+function freeSlot(){ if(activeStacks().length<5) return 'active'; if(reserveStacks().length<5) return 'reserve'; return null; }
+let spellCharges={heal:0,fireball:0,haste:0,multiply:0,resurrect:0,infection:0,towngate:0,givearmy:0,quasi:0,tornado:0};
+let view='map', curCity=null, curEncounter=null, currentWallBonus=0;
+const TOTAL_PIECES=8;
+
+function expForNext(){ return heroLevel*100; }
+function equipBonus(field){ return SLOTS.reduce((s,slot)=>{ const id=equipment[slot]; if(!id) return s; return s+(ITEMS[id].bonus[field]||0); },0); }
+function key(r,c){ return r+','+c; }
+function poiAt(r,c){
+  return pois.find(p=>{
+    if(p.r!==r||p.c!==c) return false;
+    if(p.type==='camp') return p.recruit[0].stock>0;
+    if(['city','castle','cave'].includes(p.type)) return true;
+    return !visited[key(r,c)+':'+p.type];
+  });
+}
+function setInfo(html){ document.getElementById('info').innerHTML=html; }
+function capturedCount(){ return pois.filter(p=>p.type==='castle'&&p.owner==='player').length; }
+function capturedTotal(){ return allPois().filter(p=>(p.type==='castle'||p.type==='governor')&&p.owner==='player').length; }
+function rankIndex(){ const n=capturedTotal(); let i=0; RANK_THRESHOLDS.forEach((t,k)=>{ if(n>=t) i=k; }); return Math.min(RANKS.length-1,i); }
+function currentRank(){ return RANKS[rankIndex()]; }
+function leadershipMax(){ return currentRank().leadership + bonusLeadership + equipBonus('leadership') + (week<=quasiExpireWeek?quasiBonus:0); }
+function leadershipUsed(){ return army.filter(a=>a.hp>0).reduce((s,a)=>s+Math.ceil(a.hp/UNITS[a.key].hp)*UNITS[a.key].leadershipCost,0); }
+function updateHud(){
+  trackGold();
+  document.getElementById('gold').textContent=gold;
+  document.getElementById('day').textContent=day;
+  document.getElementById('week').textContent=week;
+  document.getElementById('moves').textContent=movesLeft;
+  document.getElementById('rank').textContent=currentRank().name;
+  document.getElementById('leadership').textContent=`${leadershipUsed()}/${leadershipMax()}`;
+  document.getElementById('pieces').textContent=`${mapPieces}/${TOTAL_PIECES}`;
+  document.getElementById('contName').textContent=contCfg().emoji;
+  document.getElementById('contName').title=contCfg().name;
+  document.getElementById('contTier').textContent=contTier()+1;
+  document.getElementById('modeBadge').textContent=hardMode?'⚔️ Жёсткий режим':'🛡️ Обычный режим';
+  document.getElementById('hlevel').textContent=heroLevel;
+  document.getElementById('hexp').textContent=heroExp;
+  document.getElementById('hexpmax').textContent=expForNext();
+  document.getElementById('magicpower').textContent=heroMagicPower;
+}
+function checkLandComplete(){
+  if(!landComplete && mapPieces>=TOTAL_PIECES){
+    landComplete=true;
+    const next=curCont+1;
+    if(next<CONTINENTS.length){
+      unlocked[next]=true;
+      setTimeout(()=>setInfo(`🎉 <b>${contCfg().name} покорён!</b> На собранной карте проступил путь в земли ${CONTINENTS[next].emoji} <b>${CONTINENTS[next].name}</b>. Отплыть можно из любой пристани (нужен корабль).`),100);
+    } else {
+      stats.finishedAt=Date.now(); saveSoon(true);
+      setTimeout(()=>openStats(true),400);
+    }
+  }
+}
+function showView(v){
+  view=v;
+  setTimeout(syncBackButton,0);
+  document.body.className=document.body.className.replace(/\bv-\w+/g,'').trim()+' v-'+v;
+  document.getElementById('mapView').classList.toggle('hidden',v!=='map');
+  document.getElementById('battleView').classList.toggle('hidden',v!=='battle');
+  document.getElementById('cityView').classList.toggle('hidden',v!=='city');
+  document.getElementById('inventoryView').classList.toggle('hidden',v!=='inventory');
+  document.getElementById('armyView').classList.toggle('hidden',v!=='army');
+  document.getElementById('gameOverView').classList.toggle('hidden',v!=='gameover');
+  document.getElementById('statsView').classList.toggle('hidden',v!=='stats');
+  document.getElementById('controls').classList.toggle('hidden',v==='battle'||v==='gameover');
+  document.getElementById('hudMoreBtn').disabled=false;
+  const titles={map:'🗺️ Морвейн: Карта мира',battle:'⚔️ Морвейн: Битва',city:'🏰 Морвейн: Город',inventory:'🎒 Морвейн: Инвентарь',army:'👥 Морвейн: Армия',stats:'📊 Морвейн: Летопись',gameover:'💀 Морвейн: Конец игры'};
+  document.getElementById('titleH1').textContent=titles[v]||'🗺️ Морвейн';
+}
+function triggerGameOver(reason){
+  gameOverPermanent=true; gameOverReason=reason; saveSoon(true);
+  showView('gameover');
+  document.getElementById('gameOverView').innerHTML=`
+    <div class="cityCard"><h2 style="color:var(--bad);">💀 Игра окончена</h2>
+    <p>${reason}</p>
+    <p style="color:var(--muted);font-size:12.5px;">Жёсткий режим: поражение необратимо, второго шанса не будет.</p>
+    <button class="secondary" onclick="openStats(false)">📊 Летопись павшего героя</button>
+    <button class="secondary" onclick="openNewGame(false)">🔄 Начать заново</button></div>`;
+}
+function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+
+/* ================= MAP ================= */
+function dijkstra(){
+  const dist={},done=new Set(); dist[key(hero.row,hero.col)]=0;
+  while(true){
+    let ck=null,cd=Infinity;
+    for(const k in dist){ if(!done.has(k)&&dist[k]<cd){cd=dist[k]; ck=k;} }
+    if(ck===null) break;
+    done.add(ck); if(cd>movesLeft) continue;
+    const [r,c]=ck.split(',').map(Number);
+    for(const [nr,nc] of [[r-1,c],[r+1,c],[r,c-1],[r,c+1]]){
+      if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+      const t=TERRAIN[tch(nr,nc)];
+      let tcost = tch(nr,nc)==='w' ? (onShip?2:Infinity) : t.cost;
+      if(tcost===Infinity) continue;
+      const nk=key(nr,nc), nd=cd+tcost;
+      if(nd<=movesLeft && (dist[nk]===undefined||nd<dist[nk])) dist[nk]=nd;
+    }
+  }
+  return dist;
+}
+let onShip=false, shipPos=null, lastWaterPos=null;
+
+/* ================= STATS ================= */
+function freshStats(){ return {
+  tilesWalked:0, tilesSailed:0, voyages:0,
+  forestCut:0, rocksBroken:0, bridgesBuilt:0,
+  battlesWon:0, battlesLost:0, retreats:0, enemiesSlain:0, troopsLost:0, strongestFoe:0,
+  chestsOpened:0, scrollsRead:0, spellsCast:0, unitsRecruited:0,
+  goldEarned:0, goldSpent:0, sorcererCaught:0,
+  playMs:0, startedAt:Date.now(), finishedAt:null }; }
+let stats=freshStats(), lastGoldSeen=150, lastTick=Date.now(), gameOverReason='';
+function tickPlaytime(){
+  const now=Date.now(), d=now-lastTick; lastTick=now;
+  if(d>0 && d<120000 && document.visibilityState!=='hidden') stats.playMs+=d;
+}
+function trackGold(){
+  const d=gold-lastGoldSeen;
+  if(d>0) stats.goldEarned+=d; else if(d<0) stats.goldSpent+=-d;
+  lastGoldSeen=gold;
+}
+/* Длина реального пути по карте Дейкстры: идём от цели назад к герою. */
+function pathTiles(dist,r,c){
+  let walked=0, sailed=0, guard=0, cr=r, cc=c;
+  const cost=(rr,cc2)=>tch(rr,cc2)==='w'?(onShip?2:Infinity):TERRAIN[tch(rr,cc2)].cost;
+  while(!(cr===hero.row&&cc===hero.col) && guard++<400){
+    const here=dist[key(cr,cc)], step=cost(cr,cc); let moved=false;
+    for(const [nr,nc] of [[cr-1,cc],[cr+1,cc],[cr,cc-1],[cr,cc+1]]){
+      const d=dist[key(nr,nc)];
+      if(d!==undefined && d+step===here){ if(tch(cr,cc)==='w') sailed++; else walked++; cr=nr; cc=nc; moved=true; break; }
+    }
+    if(!moved) break;
+  }
+  return {walked,sailed};
+}
+function battleCasualties(){
+  let slain=0, lost=0;
+  stacks.forEach(s=>{
+    const uh=UNITS[s.key].hp, alive=s.hp>0?Math.ceil(s.hp/uh):0;
+    if(s.side==='enemy') slain+=Math.max(0,Math.ceil(s.maxHp/uh)-alive);
+    else lost+=Math.max(0,Math.ceil((s.startHp||s.hp)/uh)-alive);
+  });
+  stats.enemiesSlain+=slain; stats.troopsLost+=lost;
+}
+function tileClick(r,c){
+  if(view!=='map') return;
+  const dist=dijkstra(), k=key(r,c);
+  if(dist[k]===undefined){
+    if(adjacent(r,c)){
+      const t=tch(r,c);
+      if(t==='w' && hasShip && !onShip && shipPos && r===shipPos.r && c===shipPos.c) showBoardAction(r,c);
+      else if(t==='f') showForestAction(r,c);
+      else if(t==='m') showMountainAction(r,c);
+      else if(t==='w') showBridgeAction(r,c);
+    }
+    return;
+  }
+  if(onShip && tch(hero.row,hero.col)==='w') lastWaterPos={r:hero.row,c:hero.col};
+  const pt=pathTiles(dist,r,c); stats.tilesWalked+=pt.walked; stats.tilesSailed+=pt.sailed;
+  movesLeft-=dist[k]; hero.row=r; hero.col=c;
+  if(onShip && tch(r,c)!=='w'){ onShip=false; shipPos=lastWaterPos; }
+  const p=poiAt(r,c);
+  if(p) triggerPoi(p); else setInfo(`Ходов осталось: ${movesLeft}.`);
+  renderMap();
+  if(view==='map') processRoamers();
+}
+function showForestAction(r,c){
+  if(workers.lumberjack>0){
+    setInfo(`🌲 Густой лес. Отправить 🪓 Лесоруба на расчистку (осталось: ${workers.lumberjack})?<br>
+      <button onclick="cutForest(${r},${c})">Расчистить</button>
+      <button class="secondary" onclick="setInfo('')">Отмена</button>`);
+  } else {
+    setInfo(`🌲 Густой лес — без Лесоруба не пройти. Наймите Лесоруба в городе (раздел «Работники»).`);
+  }
+}
+function cutForest(r,c){
+  if(workers.lumberjack<=0){ setInfo('Нет свободного Лесоруба.'); return; }
+  workers.lumberjack--; terrainGrid[r][c]='g'; stats.forestCut++;
+  setInfo('🌲 Лесоруб расчистил путь! Дальше здесь равнина.');
+  renderMap();
+}
+function showMountainAction(r,c){
+  if(workers.stonemason>0){
+    setInfo(`⛰️ Скалы. Отправить ⛏️ Камнетёса разрушить их (осталось: ${workers.stonemason})?<br>
+      <button onclick="breakMountain(${r},${c})">Разрушить</button>
+      <button class="secondary" onclick="setInfo('')">Отмена</button>`);
+  } else {
+    setInfo(`⛰️ Скалы — без Камнетёса не пройти. Наймите Камнетёса в городе.`);
+  }
+}
+function breakMountain(r,c){
+  if(workers.stonemason<=0){ setInfo('Нет свободного Камнетёса.'); return; }
+  workers.stonemason--; terrainGrid[r][c]='g'; stats.rocksBroken++;
+  setInfo('⛰️ Камнетёс разрушил скалы! Дальше здесь равнина.');
+  renderMap();
+}
+function showBridgeAction(r,c){
+  if(workers.carpenter>0){
+    setInfo(`🌊 Здесь вода. Отправить 🔨 Плотника построить мост (осталось: ${workers.carpenter})?<br>
+      <button onclick="buildBridge(${r},${c})">Построить мост</button>
+      <button class="secondary" onclick="setInfo('')">Отмена</button>`);
+  } else {
+    setInfo(`🌊 Здесь вода — без Плотника не построить мост (или обойдите на корабле). Наймите Плотника в городе.`);
+  }
+}
+function buildBridge(r,c){
+  if(workers.carpenter<=0){ setInfo('Нет свободного Плотника.'); return; }
+  workers.carpenter--; terrainGrid[r][c]='r'; stats.bridgesBuilt++;
+  setInfo('🌉 Плотник построил мост!');
+  renderMap();
+}
+function showBoardAction(r,c){
+  setInfo(`⛵ Ваш корабль здесь. Взойти на борт?<br>
+    <button onclick="boardShip(${r},${c})">Сесть на корабль</button>
+    <button class="secondary" onclick="setInfo('')">Отмена</button>`);
+}
+function boardShip(r,c){
+  hero.row=r; hero.col=c; onShip=true; shipPos=null;
+  setInfo('⛵ Вы взошли на корабль. Теперь можно пересекать воду.');
+  renderMap();
+}
+function cityShop(){ return (curCity&&curCity.shop)||{spells:[],items:[],workers:[]}; }
+function hireWorker(type){
+  const w=WORKERS[type];
+  if(!cityShop().workers.includes(type)){ renderCity('Здесь таких работников не нанять.'); return; }
+  if(gold<w.cost){ renderCity('Недостаточно золота.'); return; }
+  gold-=w.cost; workers[type]++; updateHud();
+  renderCity(`Нанят ${w.emoji} ${w.name} (в запасе: ${workers[type]}).`);
+}
+function triggerPoi(p){
+  if(p.type==='city'){ openCity(p); }
+  else if(p.type==='castle'){
+    if(p.owner==='player'){ openCity(p); }
+    else {
+      const gsum=p.garrison.map(e=>`${UNITS[e.key].emoji}×${e.count}`).join(' ');
+      const wallLine=p.wallHp>0?`🧱 Стены: ${p.wallHp}/${p.wallMax} (защитники +3 к защите)`:`🧱 Стены разрушены.`;
+      setInfo(`🏴 <b>${p.name}</b> — правит <b>${p.lord}</b>. Гарнизон: ${gsum}<br>${wallLine}<br>
+        ${p.wallHp>0?`<button onclick="bombardWalls(${p.r},${p.c})">Обстрелять стены (-2 хода)</button>`:''}
+        <button onclick="attackCity(${p.r},${p.c})">Штурмовать</button>
+        <button class="secondary" onclick="setInfo('Вы отступили.')">Отступить</button>`);
+    }
+  }
+  else if(p.type==='governor'){
+    if(p.owner==='player'){ openCity(p); }
+    else if(p.rewardClaimed){
+      const gsum=p.garrison.map(e=>`${UNITS[e.key].emoji}×${e.count}`).join(' ');
+      const wallLine=p.wallHp>0?`🧱 Стены: ${p.wallHp}/${p.wallMax} (+3 к защите)`:`🧱 Стены разрушены.`;
+      setInfo(`👑 <b>${p.name}</b> теперь враждебен после получения награды! Гарнизон: ${gsum}<br>${wallLine}<br>
+        ${p.wallHp>0?`<button onclick="bombardWalls(${p.r},${p.c})">Обстрелять стены (-2 хода)</button>`:''}
+        <button onclick="attackGovernor(${p.r},${p.c})">Штурмовать</button>
+        <button class="secondary" onclick="setInfo('Вы отступили.')">Отступить</button>`);
+    } else {
+      const done=capturedCount(), req=p.contractsRequired;
+      if(done>=req){
+        setInfo(`👑 <b>${p.name}</b>: «Контракты на всех удельных князей выполнены! Выберите награду»:<br>
+          <button onclick="claimGovernorReward(${p.r},${p.c},'gold')">💰 Крупное золото (+800)</button>
+          <button onclick="claimGovernorReward(${p.r},${p.c},'double')">🐺 Удвоить сильнейший отряд</button>
+          <button onclick="claimGovernorReward(${p.r},${p.c},'piece')">🗺️ Часть карты + заряды магии</button>
+          <button onclick="claimGovernorReward(${p.r},${p.c},'title')">🎖️ Титул Верховного полководца</button><br>
+          <button class="secondary" onclick="attackGovernor(${p.r},${p.c})">Вместо этого — штурмовать</button>`);
+      } else {
+        setInfo(`👑 <b>${p.name}</b>: «Возьмите контракты в городах на удельных князей — покорено ${done}/${req}».<br>
+          <button onclick="attackGovernor(${p.r},${p.c})">Штурмовать без контрактов</button>
+          <button class="secondary" onclick="setInfo('Вы удалились.')">Уйти</button>`);
+      }
+    }
+  }
+  else if(p.type==='treasure'){ gold+=p.gold; visited[key(p.r,p.c)+':'+p.type]=true; updateHud(); setInfo(`💰 Найдено ${p.gold} золота!`); }
+  else if(p.type==='altar'){ handleAltarQuest(p); }
+  else if(p.type==='cave'){ openCity(p); }
+  else if(p.type==='camp'){ openCity(p); }
+  else if(p.type==='port'){
+    const dests=CONTINENTS.map((c,i)=>i).filter(i=>i!==curCont&&unlocked[i]);
+    if(hasShip && dests.length){
+      let html=`⚓ <b>${p.name}</b>: корабль готов к дальнему плаванию. Куда держим курс?<br>`;
+      dests.forEach(i=>{ const c=CONTINENTS[i]; html+=`<button onclick="sailTo(${i})">${c.emoji} ${c.name} (тир ${c.tier+1}${worlds[i]?'':', неизведано'})</button> `; });
+      html+=`<br><button class="secondary" onclick="setInfo('')">Остаться</button>`;
+      setInfo(html);
+    }
+    else if(hasShip) setInfo(`⚓ <b>${p.name}</b>: ваш единственный корабль уже спущен на воду где-то на карте. Путь в другие земли откроется, когда эта будет покорена.`);
+    else setInfo(`⚓ <b>${p.name}</b>: купить корабль за 200💰? Он появится на воде рядом с пристанью (только 1 корабль одновременно).<br>
+      <button onclick="buyShip(${p.r},${p.c})">Купить (200💰)</button>
+      <button class="secondary" onclick="setInfo('')">Не сейчас</button>`);
+  }
+  else if(p.type==='chest'){ openChest(p); }
+  else if(p.type==='scroll'){ openScroll(p); }
+  else if(p.type==='wizard'){ openWizard(p); }
+  else if(p.type==='waystone'){ openWaystone(p); }
+  else if(p.type==='pyramid'){ curEncounter={type:'pyramid',ref:p}; beginBattle(p); }
+  else if(p.type==='lair'){ startEncounter(p); }
+}
+function power(items,isArmy){
+  return items.reduce((s,it)=>{
+    if(isArmy && it.hp<=0) return s;
+    const u=UNITS[it.key], cnt=isArmy?Math.ceil(it.hp/u.hp):it.count;
+    return s+cnt*(u.hp+u.dmg[1]);
+  },0);
+}
+function startEncounter(lair){
+  const enemyPow=power(lair.enemies,false), armyPow=power(army,true);
+  if(armyPow>enemyPow*1.6 && Math.random()<0.5){
+    const cost=Math.max(50,Math.round(enemyPow*2.5));
+    setInfo(`${lair.emoji} <b>${lair.name}</b> предлагает присоединиться за <b>${cost}</b> золота, вместо боя.<br>
+      <button onclick="joinAccept(${lair.r},${lair.c},${cost})">Нанять</button>
+      <button class="secondary" onclick="joinDecline(${lair.r},${lair.c})">Атаковать</button>`);
+  } else { curEncounter={type:'lair',ref:lair}; beginBattle(lair); }
+}
+function joinAccept(r,c,cost){
+  const lair=pois.find(p=>p.r===r&&p.c===c);
+  if(gold<cost){ setInfo('Недостаточно золота — придётся сразиться!'); curEncounter={type:'lair',ref:lair}; beginBattle(lair); return; }
+  gold-=cost; updateHud();
+  let noRoom=false;
+  lair.enemies.forEach(e=>{
+    const existing=army.find(a=>a.key===e.key && a.hp>0);
+    const addHp=e.count*UNITS[e.key].hp;
+    if(existing){ existing.hp+=addHp; existing.max+=addHp; }
+    else{ const slot=freeSlot(); if(!slot){ noRoom=true; return; } army.push({id:Date.now()+Math.random(),key:e.key,hp:addHp,max:addHp,zone:slot}); }
+  });
+  visited[key(lair.r,lair.c)+':lair']=true;
+  if(noRoom) setTimeout(()=>setInfo('⚠️ Часть отрядов не поместилась — все 10 слотов армии заняты.'),1400);
+  setInfo(`${lair.name} присоединились к вашей армии!`);
+  renderMap();
+}
+function joinDecline(r,c){ const lair=pois.find(p=>p.r===r&&p.c===c); curEncounter={type:'lair',ref:lair}; beginBattle(lair); }
+function bombardWalls(r,c){
+  const city=pois.find(p=>p.r===r&&p.c===c);
+  if(movesLeft<2){ setInfo('Недостаточно ходов (нужно 2).'); return; }
+  movesLeft-=2;
+  const dmg=randInt(20,40);
+  city.wallHp=Math.max(0,city.wallHp-dmg);
+  updateHud();
+  if(city.wallHp<=0) setInfo(`💥 Стены «${city.name}» пробиты!`);
+  else setInfo(`💥 Обстрел: -${dmg} прочности (осталось ${city.wallHp}/${city.wallMax}). Ходов: ${movesLeft}.`);
+  renderMap();
+}
+function attackCity(r,c){
+  const city=pois.find(p=>p.r===r&&p.c===c);
+  if(hardMode && activeStacks().length===0){
+    triggerGameOver(`Вы бросились на штурм «${city.name}» голыми руками, без единого воина. Стража даже не стала утруждаться боем.`);
+    return;
+  }
+  curEncounter={type:'capture',ref:city};
+  currentWallBonus=city.wallHp>0?3:0;
+  beginBattle({name:city.name, enemies:city.garrison});
+}
+function attackGovernor(r,c){
+  const gov=pois.find(p=>p.r===r&&p.c===c);
+  if(hardMode && activeStacks().length===0){
+    triggerGameOver(`Вы бросились на штурм «${gov.name}» голыми руками, без единого воина.`);
+    return;
+  }
+  curEncounter={type:'governor_war',ref:gov};
+  currentWallBonus=gov.wallHp>0?3:0;
+  beginBattle({name:gov.name, enemies:gov.garrison});
+}
+function claimGovernorReward(r,c,choice){
+  r=Number(r); c=Number(c);
+  const gov=pois.find(p=>p.r===r&&p.c===c&&p.type==='governor');
+  if(!gov) return;
+  gov.rewardClaimed=true; governorWage+=50;
+  if(choice==='gold'){ gold+=800; setInfo('👑 «Прими эти сокровища за верную службу» — +800💰. Отныне Хозяин Земли враждебен.'); }
+  else if(choice==='double'){
+    const alive=army.filter(a=>a.hp>0);
+    if(alive.length){
+      alive.sort((a,b)=>b.hp-a.hp);
+      const s=alive[0]; const u=UNITS[s.key];
+      s.hp*=2; s.max*=2;
+      let cnt=Math.ceil(s.hp/u.hp);
+      while(leadershipUsed()>leadershipMax() && cnt>1){ cnt--; s.hp=cnt*u.hp; s.max=s.hp; }
+      setInfo(`👑 «Пусть твоя сила утроится» — «${u.name}» удвоены (${cnt} шт). Отныне Хозяин Земли враждебен.`);
+    } else setInfo('👑 У вас нет войск, чтобы удвоить. Награда пропала впустую.');
+  }
+  else if(choice==='piece'){
+    mapPieces=Math.min(TOTAL_PIECES-1,mapPieces+1);
+    SPELLS.forEach(s=>spellCharges[s.key]=(spellCharges[s.key]||0)+2);
+    setInfo('👑 Получена часть древней карты и +2 заряда ко всем заклинаниям! Отныне Хозяин Земли враждебен.');
+  }
+  else if(choice==='title'){
+    bonusLeadership+=100;
+    SPELLS.forEach(s=>spellCharges[s.key]=(spellCharges[s.key]||0)+2);
+    setInfo('🎖️ Вы удостоены титула Верховного полководца: +100 к лидерству навсегда, +2 заряда заклинаний! Отныне Хозяин Земли враждебен.');
+  }
+  updateHud();
+  renderMap();
+}
+function findAdjacentWater(r,c){
+  for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]){
+    const nr=r+dr,nc=c+dc;
+    if(nr<0||nr>=ROWS||nc<0||nc>=COLS) continue;
+    if(tch(nr,nc)==='w') return {r:nr,c:nc};
+  }
+  return null;
+}
+function buyShip(pr,pc){
+  if(gold<200){ setInfo('Недостаточно золота на корабль.'); return; }
+  if(hasShip){ setInfo('У вас уже есть корабль — можно владеть только одним.'); return; }
+  gold-=200; hasShip=true; updateHud();
+  shipPos=findAdjacentWater(pr,pc) || {r:pr,c:pc};
+  setInfo('⚓ Корабль спущен на воду у пристани! Подойдите к нему и взойдите на борт, чтобы пересекать воду.');
+  renderMap();
+}
+function sailTo(i){
+  if(!unlocked[i]||!hasShip||i===curCont) return;
+  const from=contCfg().name;
+  const w=loadWorld(i);
+  hero={row:w.arrival.r,col:w.arrival.c};
+  onShip=false; lastWaterPos=null;
+  shipPos=findAdjacentWater(w.arrival.r,w.arrival.c)||{r:w.arrival.r,c:w.arrival.c};
+  movesLeft=0; stats.voyages++;
+  saveSoon(true);
+  setInfo(`⛵ Долгое плавание из ${from} окончено: вы сошли на берег земли ${contCfg().emoji} <b>${contCfg().name}</b>. Корабль ждёт у пристани. Ходы на сегодня исчерпаны.`);
+  renderMap();
+}
+function questLair(){ return pois.find(p=>p.type==='lair'&&p.name==='Драконье гнездо'); }
+function handleAltarQuest(p){
+  const lair=questLair();
+  const lairDone=visited[key(lair.r,lair.c)+':lair']===true;
+  if(questState==='available'){
+    setInfo(`📜 <b>${p.name}</b>: дух хранителя просит уничтожить Драконье гнездо и вернуться.<br>Награда: 200💰 + 15 к лидерству навсегда.<br>
+      <button onclick="acceptQuest()">Принять</button>
+      <button class="secondary" onclick="setInfo('Отказано.')">Отказаться</button>`);
+  } else if(questState==='active'){
+    if(lairDone) setInfo(`📜 Драконье гнездо уничтожено! <button onclick="claimQuestReward()">Забрать награду</button>`);
+    else setInfo(`📜 Квест активен — найдите и уничтожьте Драконье гнездо.`);
+  } else setInfo(`📜 «Благодарю за помощь, искатель приключений».`);
+}
+function acceptQuest(){ questState='active'; setInfo('Квест принят: уничтожьте Драконье гнездо.'); }
+function claimQuestReward(){
+  questState='completed'; gold+=200; bonusLeadership+=15; updateHud();
+  setInfo('🎁 Награда получена: +200💰 и +15 к лидерству навсегда!');
+}
+function openChest(p){
+  setInfo(`🎁 <b>${p.name}</b> — выбор:<br>
+    <button onclick="chestChoice(${p.r},${p.c},'gold')">💰 Золото (+${p.goldBase||120})</button>
+    <button onclick="chestChoice(${p.r},${p.c},'wisdom')">📚 Мудрость (+10 к лидерству)</button>
+    <button class="secondary" onclick="chestChoice(${p.r},${p.c},'risk')">🎲 Рискнуть</button>`);
+}
+function chestChoice(r,c,type){
+  const p=pois.find(x=>x.r===r&&x.c===c);
+  visited[key(r,c)+':chest']=true; stats.chestsOpened++;
+  const base=(p&&p.goldBase)||120;
+  if(type==='gold'){ gold+=base; updateHud(); setInfo(`💰 Вы забрали ${base} золота.`); }
+  else if(type==='wisdom'){ bonusLeadership+=10; updateHud(); setInfo('📚 +10 к лидерству навсегда.'); }
+  else if(type==='risk'){
+    if(Math.random()<0.5){ const win=base*2; gold+=win; updateHud(); setInfo(`🎲 Повезло! +${win} золота.`); }
+    else{
+      const alive=army.filter(a=>a.hp>0);
+      if(alive.length){ alive.sort((a,b)=>a.hp-b.hp); const weak=alive[0], loss=Math.round(weak.hp*0.3); weak.hp-=loss;
+        setInfo(`🎲 Ловушка! «${UNITS[weak.key].name}» потеряли часть отряда (-${loss} хп).`); }
+      else setInfo('🎲 Ловушка сработала, но пострадать было некому.');
+    }
+  }
+  renderMap();
+}
+function openScroll(p){
+  visited[key(p.r,p.c)+':scroll']=true; stats.scrollsRead++;
+  if(Math.random()<0.55){
+    const spell=SPELLS[Math.floor(Math.random()*SPELLS.length)];
+    spellCharges[spell.key]=(spellCharges[spell.key]||0)+1;
+    updateHud();
+    setInfo(`📃 Свиток раскрывает тайну: получено заклинание «${spell.name}» (${spell.emoji})!`);
+  } else {
+    setInfo(`📃 Свиток... ${applyCursedScroll()}`);
+  }
+  updateHud();
+  renderMap();
+}
+function applyCursedScroll(){
+  const availableWorker=Object.keys(workers).find(k=>workers[k]>0);
+  const aliveStacks=army.filter(a=>a.hp>0);
+  const canSinkShip=hasShip && !onShip;
+  const options=[];
+  options.push(()=>{ const lost=Math.floor(gold*0.5); gold-=lost; return `оказался проклят! Потеряна половина золота (-${lost}💰).`; });
+  if(availableWorker){ options.push(()=>{ workers[availableWorker]--; return `спугнул работников! Один ${WORKERS[availableWorker].name} сбежал.`; }); }
+  if(aliveStacks.length){ options.push(()=>{ aliveStacks.sort((a,b)=>b.hp-a.hp); const s=aliveStacks[0]; const loss=Math.round(s.hp*0.2); s.hp-=loss; return `навёл порчу на «${UNITS[s.key].name}» (-${loss} хп отряда).`; }); }
+  if(Object.values(spellCharges).some(v=>v>0)){ options.push(()=>{ Object.keys(spellCharges).forEach(k=>spellCharges[k]=0); return `развеял все ваши заклинания!`; }); }
+  if(canSinkShip){ options.push(()=>{ hasShip=false; shipPos=null; return `утопил ваш корабль на приколе!`; }); }
+  const pick=options[Math.floor(Math.random()*options.length)];
+  return pick();
+}
+function openWizard(p){
+  setInfo(`🧙‍♂️ <b>${p.name}</b>: «Каждая наша встреча укрепляет твой дух». Принять дар (+2 к магической силе)?<br>
+    <button onclick="claimWizardGift(${p.r},${p.c})">Принять дар</button>`);
+}
+function claimWizardGift(r,c){
+  const p=pois.find(x=>x.r===r&&x.c===c&&x.type==='wizard');
+  if(!p) return;
+  heroMagicPower+=2;
+  const spot=randomWalkableSpot(hero.row,hero.col,8); if(spot){ p.r=spot.r; p.c=spot.c; }
+  updateHud();
+  setInfo('✨ Волшебник благословляет вас: +2 к магической силе! Он растворяется в воздухе — встретите его снова где-то ещё на континенте.');
+  renderMap();
+}
+/* Случайная пустая клетка, куда можно дойти пешком без расчистки (не ближе minDist к герою). */
+function randomWalkableSpot(sr,sc,minDist){
+  const {dist}=obstacleDijkstra(sr,sc), cand=[];
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    if(dist[r*COLS+c]!==0) continue;
+    if(Math.max(Math.abs(r-sr),Math.abs(c-sc))<minDist) continue;
+    if(pois.some(q=>q.r===r&&q.c===c)) continue;
+    cand.push({r,c});
+  }
+  return cand.length?cand[Math.floor(Math.random()*cand.length)]:null;
+}
+function openWaystone(p){
+  visited[key(p.r,p.c)+':waystone']=true;
+  if(p.reward.type==='gold'){ gold+=p.reward.value; setInfo(`🪨 Придорожный камень: +${p.reward.value}💰.`); }
+  else{ heroExp+=p.reward.value; checkLevelUp(); setInfo(`🪨 Придорожный камень: +${p.reward.value} опыта.`); }
+  updateHud(); renderMap();
+}
+
+/* ================= ROAMING ENEMIES & BLACK SORCERER ================= */
+/* Мобы ходят только по проходимой земле (равнина, дорога/мост, болото, пустыня).
+   Лес, горы и вода для них — стена, как и для героя без работников. */
+const MOB_PASSABLE=new Set(['g','d','s','r']);
+function mobCanStand(r,c){ return r>=0&&r<ROWS&&c>=0&&c<COLS&&MOB_PASSABLE.has(terrainGrid[r][c]); }
+const DIRS8=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+// диагональ разрешена, только если обе соседние прямые клетки проходимы (нельзя «срезать угол» скалы)
+function mobCanStep(r,c,dr,dc){
+  if(!mobCanStand(r+dr,c+dc)) return false;
+  if(dr!==0&&dc!==0) return mobCanStand(r+dr,c)&&mobCanStand(r,c+dc);
+  return true;
+}
+/* Поле расстояний от героя (BFS по 8 направлениям). Мобы спускаются по нему — обходят препятствия, а не лезут напрямик. */
+function mobDistanceField(){
+  const field=new Int16Array(ROWS*COLS).fill(-1);
+  const q=[hero.row*COLS+hero.col]; field[q[0]]=0;
+  for(let i=0;i<q.length;i++){
+    const id=q[i], r=(id/COLS)|0, c=id%COLS;
+    for(const [dr,dc] of DIRS8){
+      if(!mobCanStep(r,c,dr,dc)) continue;
+      const nid=(r+dr)*COLS+(c+dc); if(field[nid]!==-1) continue;
+      field[nid]=field[id]+1; q.push(nid);
+    }
+  }
+  return field;
+}
+function mobStep(entity,field){
+  const here=field[entity.r*COLS+entity.c];
+  if(here<=0) return false; // герой недостижим пешком (или уже рядом на той же клетке) — стоим
+  let best=null, bestD=here;
+  for(const [dr,dc] of DIRS8){
+    if(!mobCanStep(entity.r,entity.c,dr,dc)&&!((entity.r+dr)===hero.row&&(entity.c+dc)===hero.col)) continue;
+    const d=field[(entity.r+dr)*COLS+(entity.c+dc)];
+    if(d>=0&&d<bestD){ bestD=d; best=[dr,dc]; }
+  }
+  if(!best) return false;
+  entity.r+=best[0]; entity.c+=best[1];
+  return true;
+}
+function processRoamers(){
+  const field=mobDistanceField();
+  pois.filter(p=>p.type==='lair' && p.roaming && !visited[key(p.r,p.c)+':lair']).forEach(p=>{
+    const d=Math.max(Math.abs(hero.row-p.r),Math.abs(hero.col-p.c));
+    const pathD=field[p.r*COLS+p.c];
+    // замечает героя в радиусе и только если к нему есть недлинный путь по земле
+    if(d<=p.aggroRadius && d>0 && pathD>0 && pathD<=p.aggroRadius+3){
+      mobStep(p,field);
+      if(p.r===hero.row&&p.c===hero.col){ startEncounter(p); }
+    }
+  });
+  if(sorcerer && sorcerer.active && view==='map'){
+    const already=(sorcerer.r===hero.row&&sorcerer.c===hero.col);
+    if(!already) mobStep(sorcerer,field);
+    if(sorcerer.r===hero.row&&sorcerer.c===hero.col){ sorcererCatch(); }
+  }
+}
+function relocateSorcerer(){
+  const spot=randomWalkableSpot(hero.row,hero.col,10);
+  if(spot){ sorcerer.r=spot.r; sorcerer.c=spot.c; }
+}
+function sorcererCatch(){
+  stats.sorcererCaught++;
+  const options=[];
+  options.push(()=>{ const lost=Math.floor(gold*0.4); gold-=lost; return `похищает ${lost}💰!`; });
+  options.push(()=>{ const lost=Math.min(bonusLeadership,10); bonusLeadership-=lost; return `ослабляет ваш авторитет (-${lost} к лидерству)!`; });
+  const alive=army.filter(a=>a.hp>0);
+  if(alive.length){ options.push(()=>{ alive.sort((a,b)=>b.hp-a.hp); const s=alive[0]; const loss=Math.round(s.hp*0.3); s.hp-=loss; return `забирает часть «${UNITS[s.key].name}» (-${loss} хп)!`; }); }
+  const pick=options[Math.floor(Math.random()*options.length)];
+  const msg=pick();
+  relocateSorcerer();
+  updateHud();
+  setInfo(`🌑 Чёрный Колдун настиг вас и ${msg} Он растворяется во тьме...`);
+  renderMap();
+}
+
+/* ================= ADVENTURE MAGIC ================= */
+function openAdventureMagic(){
+  if(view!=='map') return;
+  let html=`🪄 <b>Походная магия</b>:<br>`;
+  ADV_SPELLS.forEach(s=>{
+    const owned=spellCharges[s.key]||0;
+    html+=`<button ${owned<=0?'disabled':''} onclick="castAdventureSpell('${s.key}')">${s.emoji} ${s.name} (${owned})</button> `;
+  });
+  if(ADV_SPELLS.every(s=>!(spellCharges[s.key]>0))) html+='<br><span style="color:var(--muted);font-size:12.5px;">Нет запасов — купите в лавке заклинаний любого города.</span>';
+  setInfo(html);
+}
+function castAdventureSpell(k){
+  if(!spellCharges[k]) return;
+  if(k==='towngate'){ showTownGatePicker(); return; }
+  spellCharges[k]--; stats.spellsCast++; updateHud();
+  if(k==='givearmy'){
+    const allKeys=Object.keys(UNITS);
+    const uk=allKeys[Math.floor(Math.random()*allKeys.length)];
+    const count=Math.max(2,Math.round(20/UNITS[uk].tier));
+    const addHp=count*UNITS[uk].hp;
+    let existing=army.find(a=>a.key===uk&&a.hp>0);
+    if(existing){ existing.hp+=addHp; existing.max+=addHp; setInfo(`🐎 ${UNITS[uk].emoji} ${UNITS[uk].name} ×${count} присоединились к армии!`); }
+    else{ const slot=freeSlot(); if(!slot){ setInfo('⚠️ Все 10 слотов армии заняты — отряд не смог присоединиться.'); }
+      else{ army.push({id:Date.now()+Math.random(),key:uk,hp:addHp,max:addHp,zone:slot}); setInfo(`🐎 Дух битвы отвечает на зов: ${UNITS[uk].emoji} ${UNITS[uk].name} ×${count} присоединились к армии (${slot==='active'?'актив':'резерв'})!`); } }
+  } else if(k==='quasi'){
+    quasiExpireWeek=week+1; quasiBonus=40;
+    setInfo('📈 Квази-авторитет: +40 к лидерству до конца текущей недели.');
+  } else if(k==='tornado'){
+    if(!sorcerer || !sorcerer.active){ setInfo('🌪️ Колдуна сейчас нигде не видно.'); }
+    else{
+      relocateSorcerer();
+      setInfo('🌪️ Смерч подхватывает Чёрного Колдуна и уносит его далеко прочь!');
+    }
+  }
+  renderMap();
+}
+function showTownGatePicker(){
+  const destinations=pois.filter(p=>p.type==='city'||((p.type==='castle'||p.type==='cave'||p.type==='governor')&&p.owner==='player'));
+  if(destinations.length===0){ setInfo('🚪 Пока нет ни одной освоенной точки для телепортации.'); return; }
+  let html='🚪 <b>Переход к городу</b> — куда перенестись?<br>';
+  destinations.forEach(d=>{ html+=`<button onclick="doTownGate(${d.r},${d.c})">${d.emoji} ${d.name}</button> `; });
+  html+='<br><button class="secondary" onclick="setInfo(\'\')">Отмена</button>';
+  setInfo(html);
+}
+function doTownGate(r,c){
+  spellCharges.towngate--; stats.spellsCast++; updateHud();
+  hero.row=r; hero.col=c;
+  setInfo('🚪 Вы перенеслись через портал!');
+  renderMap();
+}
+
+/* ================= CITY / CASTLE HUB ================= */
+function openCity(p){ curCity=p; if(p.type==='city') p.seen=true; showView('city'); renderCity(); }
+function sellPrice(key){ return Math.max(1, Math.round(UNITS[key].upkeep*4)); }
+function recruitUnit(pr,pc,k,qty){
+  pr=Number(pr); pc=Number(pc);
+  const p=(curCity&&curCity.r===pr&&curCity.c===pc)?curCity:pois.find(x=>x.r===pr&&x.c===pc&&x.recruit);
+  const r=p.recruit.find(x=>x.key===k);
+  const cost=r.cost;
+  qty=Math.min(qty,r.stock);
+  if(qty<=0){ renderCity('Запас исчерпан на этой неделе.'); return; }
+  const total=cost*qty;
+  if(gold<total){ renderCity('Недостаточно золота.'); return; }
+  const need=qty*UNITS[k].leadershipCost;
+  if(leadershipUsed()+need>leadershipMax()){ renderCity(`Не хватает лидерства: нужно ${leadershipUsed()+need}, доступно ${leadershipMax()}.`); return; }
+  let existing=army.find(a=>a.key===k && a.hp>0);
+  let slot=null;
+  if(!existing){ slot=freeSlot(); if(!slot){ renderCity('⚠️ Все 10 слотов армии заняты (5 актив + 5 резерв). Распустите или объедините отряды.'); return; } }
+  gold-=total; r.stock-=qty; stats.unitsRecruited+=qty; updateHud();
+  const addHp=qty*UNITS[k].hp;
+  if(existing){ existing.hp+=addHp; existing.max+=addHp; } else army.push({id:Date.now()+Math.random(),key:k,hp:addHp,max:addHp,zone:slot});
+  renderCity(`Наняты ${UNITS[k].emoji} ${UNITS[k].name} ×${qty}.`);
+}
+function sellUnit(armyId,qty){
+  const a=army.find(x=>String(x.id)===String(armyId) && x.hp>0);
+  if(!a) return;
+  const u=UNITS[a.key], have=Math.ceil(a.hp/u.hp), sellQty=Math.min(qty,have);
+  a.hp=Math.max(0,a.hp-sellQty*u.hp);
+  const earned=sellQty*sellPrice(a.key);
+  gold+=earned; updateHud();
+  renderCity(`Продано ${u.emoji} ${u.name} ×${sellQty} за ${earned}💰.`);
+}
+function spellCost(s){ return Math.max(20, Math.round(s.cost*(1-heroMagicPower*0.02))); }
+function buySpell(k){
+  const s=spellByKey(k);
+  if(!s||!cityShop().spells.includes(k)) return;
+  if(heroMagicPower<s.reqMagic){ renderCity(`Не хватает магической силы: нужно ${s.reqMagic}, у вас ${heroMagicPower}.`); return; }
+  const cost=spellCost(s);
+  if(gold<cost){ renderCity('Недостаточно золота.'); return; }
+  gold-=cost; updateHud(); spellCharges[k]=(spellCharges[k]||0)+1;
+  renderCity(`Куплено: ${s.name}.`);
+}
+function buyItem(id){
+  const it=ITEMS[id];
+  if(!it||!cityShop().items.includes(id)) return;
+  if(gold<it.cost){ renderCity('Недостаточно золота.'); return; }
+  gold-=it.cost; inventory.push(id); updateHud();
+  renderCity(`Куплено: ${it.name}. Наденьте его в 🎒 Инвентаре.`);
+}
+function leaveCity(){ showView('map'); setInfo(''); }
+function renderCity(msg){
+  const p=curCity; if(!p) return;
+  updateHud(); saveSoon();
+  const armyLine=army.filter(a=>a.hp>0).map(a=>`${UNITS[a.key].emoji}${UNITS[a.key].name}×${Math.ceil(a.hp/UNITS[a.key].hp)}`).join(', ')||'нет отрядов';
+  const sh=p.shop||{spells:[],items:[],workers:[]};
+  let html=`<div class="cityCard"><h2>${p.emoji} ${p.name}</h2>${p.shop?`<div class="armyline" style="color:var(--accent);">${p.shop.title}</div>`:''}<div class="armyline">Ваша армия: ${armyLine}</div>
+    ${msg?`<div class="armyline" style="color:var(--good);margin-top:6px;">${msg}</div>`:''}</div>`;
+  const minimal=p.isCave||p.isCamp;
+  html+=`<div class="cityCard"><h2>${p.isCave?'Найм (эксклюзивные существа)':p.isCamp?'Случайный отряд наёмников':'Найм войск'}</h2>`;
+  if(p.isCave) html+=`<div class="armyline" style="margin-bottom:6px;">🕳️ Запас пещеры общий на всю игру и не пополняется. Цены выше городских.</div>`;
+  if(p.isCamp) html+=`<div class="armyline" style="margin-bottom:6px;">⛺ Лагерь исчезнет с карты, как только отряд будет выкуплен полностью.</div>`;
+  p.recruit.forEach(r=>{
+    const u=UNITS[r.key];
+    const out=r.stock<=0;
+    html+=`<div class="row"><span>${u.emoji} ${u.name} — ${r.cost}💰/шт (в запасе: ${r.stock}/${r.maxStock})<br><span style="color:var(--muted)">лид. ${u.leadershipCost}, содержание ${u.upkeep}💰/нед</span></span>
+      <span class="rowbtns"><button onclick="recruitUnit(${p.r},${p.c},'${r.key}',1)" ${out?'disabled':''}>+1</button><button onclick="recruitUnit(${p.r},${p.c},'${r.key}',5)" ${out?'disabled':''}>+5</button></span></div>`;
+  });
+  html+=`</div>`;
+  if(!minimal){
+    if(sh.workers.length){
+    html+=`<div class="cityCard"><h2>👷 Гильдия работников</h2>`;
+    Object.entries(WORKERS).filter(([wid])=>sh.workers.includes(wid)).forEach(([wid,w])=>{
+      html+=`<div class="row"><span>${w.emoji} ${w.name} — ${w.desc} — ${w.cost}💰<br><span style="color:var(--muted)">В запасе у героя: ${workers[wid]}</span></span>
+        <span class="rowbtns"><button onclick="hireWorker('${wid}')">Нанять</button></span></div>`;
+    });
+    html+=`</div>`;
+    }
+    html+=`<div class="cityCard"><h2>Рынок — продажа войск</h2>`;
+    const owned=army.filter(a=>a.hp>0);
+    if(owned.length===0) html+=`<div class="armyline">Нечего продавать.</div>`;
+    owned.forEach(a=>{
+      const u=UNITS[a.key], sp=sellPrice(a.key), cnt=Math.ceil(a.hp/u.hp);
+      html+=`<div class="row"><span>${u.emoji} ${u.name} ×${cnt} — ${sp}💰/шт</span>
+        <span class="rowbtns"><button class="secondary" onclick="sellUnit('${a.id}',1)">-1</button><button class="secondary" onclick="sellUnit('${a.id}',5)">-5</button></span></div>`;
+    });
+    html+=`</div>`;
+    if(sh.spells.length){
+    html+=`<div class="cityCard"><h2>📜 Лавка заклинаний (🔮 Маг.сила: ${heroMagicPower})</h2><div class="armyline">Боевые — для сражений. Походные — используются прямо на карте.</div>`;
+    [...SPELLS.map(s=>({...s,ctx:'бой'})),...ADV_SPELLS.map(s=>({...s,ctx:'поход'}))].filter(s=>sh.spells.includes(s.key)).forEach(s=>{
+      const locked=heroMagicPower<s.reqMagic;
+      const cost=spellCost(s);
+      html+=`<div class="row"><span>${s.emoji} ${s.name} [${s.ctx}] (${s.desc}) — ${cost}💰${locked?` <span style="color:var(--bad)">(нужна маг.сила ${s.reqMagic})</span>`:''}<br><span style="color:var(--muted)">В запасе: ${spellCharges[s.key]||0}</span></span>
+        <span class="rowbtns"><button onclick="buySpell('${s.key}')" ${locked?'disabled':''}>Купить</button></span></div>`;
+    });
+    html+=`</div>`;
+    }
+    if(sh.items.length){
+    html+=`<div class="cityCard"><h2>⚔️ Оружейная</h2>`;
+    Object.entries(ITEMS).filter(([id])=>sh.items.includes(id)).forEach(([id,it])=>{
+      const isOwned=equipment[it.slot]===id||inventory.includes(id);
+      const isRare=sh.rare===id;
+      html+=`<div class="row"><span>${it.emoji} ${it.name} <span style="color:var(--accent);font-size:11px;">${tierStars(it.tier)}</span>${isRare?' <span style="color:var(--good);font-size:11.5px;">редкость!</span>':''} — ${it.cost}💰<br><span style="color:var(--muted)">${fmtBonus(it)}</span></span>
+        <span class="rowbtns">${isOwned?'<span style="color:var(--muted);font-size:12px;">есть</span>':`<button onclick="buyItem('${id}')">Купить</button>`}</span></div>`;
+    });
+    html+=`</div>`;
+    }
+  }
+  html+=`<button class="secondary" onclick="leaveCity()">Покинуть город</button>`;
+  document.getElementById('cityView').innerHTML=html;
+}
+
+/* ================= INVENTORY ================= */
+function openInventory(){ if(view==='battle') return; showView('inventory'); renderInventory(); }
+function renderInventory(msg){
+  updateHud(); saveSoon();
+  const slotNames={weapon:'Оружие',armor:'Броня',helmet:'Шлем',amulet:'Амулет'};
+  let html=`<div class="cityCard"><h2>🎒 Снаряжение героя</h2>`;
+  if(msg) html+=`<div class="armyline" style="color:var(--good);margin-bottom:6px;">${msg}</div>`;
+  SLOTS.forEach(slot=>{
+    const id=equipment[slot];
+    if(id){ const it=ITEMS[id]; const bonusText=fmtBonus(it);
+      html+=`<div class="row"><span>${it.emoji} ${slotNames[slot]}: <b>${it.name}</b> (${bonusText})</span>
+        <span class="rowbtns"><button class="secondary" onclick="unequipItem('${slot}')">Снять</button></span></div>`;
+    } else html+=`<div class="row"><span>${slotNames[slot]}: пусто</span><span></span></div>`;
+  });
+  html+=`</div><div class="cityCard"><h2>Сумка</h2>`;
+  if(inventory.length===0) html+=`<div class="armyline">Пусто. Снаряжение продаётся в оружейных — загляните в 📖 Справочник городов, где что есть.</div>`;
+  inventory.forEach((id,i)=>{
+    const it=ITEMS[id]; const bonusText=fmtBonus(it);
+    html+=`<div class="row"><span>${it.emoji} ${it.name} (${bonusText})</span>
+      <span class="rowbtns"><button onclick="equipItem(${i})">Надеть</button><button class="secondary" onclick="sellItem(${i})">Продать (${Math.round(it.cost*0.5)}💰)</button></span></div>`;
+  });
+  html+=`</div><div class="cityCard"><h2>🔺 Ритуальные предметы (${ritualCount()}/4)</h2><div class="armyline">Хранятся в пирамидах. Каждый даёт +${RITUAL_MAGIC} к магической силе, полный набор — ещё +${RITUAL_SET_LEADERSHIP} к лидерству${ritualSetDone?' ✅':''}.</div>`;
+  Object.entries(RITUAL_ITEMS).forEach(([k,it])=>{
+    html+=`<div class="row"><span>${it.emoji} ${it.name}</span><span>${ritualItems[k]?`✅ <span style="color:var(--muted);font-size:12px;">+${RITUAL_MAGIC} 🔮</span>`:'❌'}</span></div>`;
+  });
+  html+=`</div><button class="secondary" onclick="showView('map')">Назад на карту</button>`;
+  document.getElementById('inventoryView').innerHTML=html;
+}
+function equipItem(i){ const id=inventory[i]; if(!id) return; const it=ITEMS[id]; if(equipment[it.slot]) inventory.push(equipment[it.slot]); equipment[it.slot]=id; inventory.splice(i,1); updateHud(); renderInventory(`Надето: ${it.name}.`); }
+function unequipItem(slot){ const id=equipment[slot]; if(!id) return; inventory.push(id); equipment[slot]=null; updateHud(); renderInventory('Снято в сумку.'); }
+function sellItem(i){ const id=inventory[i]; if(!id) return; const it=ITEMS[id]; gold+=Math.round(it.cost*0.5); inventory.splice(i,1); updateHud(); renderInventory(`Продано: ${it.name}.`); }
+
+/* ================= ARMY MANAGEMENT ================= */
+function openArmyView(){ if(view==='battle') return; showView('army'); renderArmyView(); }
+function renderArmyStackRow(a){
+  const u=UNITS[a.key], cnt=Math.ceil(a.hp/u.hp);
+  const targetZone=a.zone==='active'?'резерв':'актив';
+  return `<div class="row" style="flex-wrap:wrap;"><span>${u.emoji} <b>${u.name}</b> ×${cnt} (hp ${a.hp}/${a.max}, лид. ${cnt*u.leadershipCost})</span>
+      <span class="rowbtns"><button class="secondary" onclick="switchZone('${a.id}')">→ ${targetZone}</button></span></div>
+      <div class="row" style="padding-top:0;">
+        <span style="font-size:12px;color:var(--muted);">Разделить: <input type="number" id="split_${a.id}" min="1" max="${cnt-1||0}" value="1" style="width:48px;"> шт</span>
+        <span class="rowbtns"><button onclick="splitStack('${a.id}')" ${cnt<2?'disabled':''}>Разделить</button><button class="secondary" onclick="dismissStack('${a.id}')">Уволить</button></span>
+      </div>`;
+}
+function renderArmyView(msg){
+  updateHud(); saveSoon();
+  const act=activeStacks(), res=reserveStacks();
+  let html=`<div class="cityCard"><h2>👥 Активный отряд (${act.length}/5)</h2><div class="armyline">Сражается в бою.</div>`;
+  if(msg) html+=`<div class="armyline" style="color:var(--good);margin-bottom:6px;">${msg}</div>`;
+  if(act.length===0) html+=`<div class="armyline">Пусто — в бой пойти будет не с кем!</div>`;
+  act.forEach(a=>{ html+=renderArmyStackRow(a); });
+  html+=`</div><div class="cityCard"><h2>🛡️ Резерв (${res.length}/5)</h2><div class="armyline">Не участвует в бою, но занимает слот.</div>`;
+  if(res.length===0) html+=`<div class="armyline">Пусто.</div>`;
+  res.forEach(a=>{ html+=renderArmyStackRow(a); });
+  html+=`</div><button class="secondary" onclick="showView('map')">Назад на карту</button>`;
+  document.getElementById('armyView').innerHTML=html;
+}
+function splitStack(armyId){
+  const a=army.find(x=>String(x.id)===String(armyId) && x.hp>0); if(!a) return;
+  const u=UNITS[a.key], have=Math.ceil(a.hp/u.hp);
+  if(have<2){ renderArmyView('Нельзя разделить отряд из одного существа.'); return; }
+  const slot=freeSlot();
+  if(!slot){ renderArmyView('⚠️ Нет свободного слота (5 актив + 5 резерв заняты) — разделить некуда.'); return; }
+  const input=document.getElementById('split_'+a.id);
+  let qty=Math.max(1,Math.min(have-1, parseInt(input?.value)||1));
+  const moveHp=qty*u.hp; a.hp-=moveHp; a.max-=moveHp;
+  army.push({id:Date.now()+Math.random(),key:a.key,hp:moveHp,max:moveHp,zone:slot});
+  renderArmyView(`Выделено ${qty} × ${u.name} в новый отряд (${slot==='active'?'актив':'резерв'}).`);
+}
+function dismissStack(armyId){ const a=army.find(x=>String(x.id)===String(armyId)); if(!a) return; a.hp=0; updateHud(); renderArmyView(`Отряд «${UNITS[a.key].name}» распущен.`); }
+function switchZone(armyId){
+  const a=army.find(x=>String(x.id)===String(armyId) && x.hp>0); if(!a) return;
+  const target=a.zone==='active'?'reserve':'active';
+  const count=target==='active'?activeStacks().length:reserveStacks().length;
+  if(count>=5){ renderArmyView(`⚠️ ${target==='active'?'Актив':'Резерв'} уже полон (5/5).`); return; }
+  a.zone=target;
+  renderArmyView(`«${UNITS[a.key].name}» переведён в ${target==='active'?'актив':'резерв'}.`);
+}
+
+/* ================= BATTLE ================= */
+let stacks=[],order=[],idx=0,battleOver=false,logLines=[];
+function bUnit(s){ return UNITS[s.key]; }
+function bCount(s){ return Math.max(1,Math.ceil(s.hp/bUnit(s).hp)); }
+function bOccupied(r,c){ return stacks.some(s=>s.hp>0&&s.row===r&&s.col===c); }
+function bLog(t){ logLines.push(t); if(logLines.length>60) logLines.shift(); }
+function syncArmyFromBattle(){ stacks.filter(s=>s.side==='player').forEach(s=>{ const a=army.find(x=>x.id===s.armyId); if(a) a.hp=s.hp; }); }
+function beginBattle(enc){
+  logLines=[]; battleOver=false;
+  lastBattleEnemyPower=power(enc.enemies,false);
+  const prows=[0,2,3,5];
+  stacks=activeStacks().map((a,i)=>({id:'p'+a.id,side:'player',key:a.key,hp:a.hp,startHp:a.hp,maxHp:a.max,row:prows[i]||i,col:0,armyId:a.id}));
+  const erows=[0,2,3,5];
+  enc.enemies.forEach((e,i)=>{ const hp=e.count*UNITS[e.key].hp; stacks.push({id:'e'+i,side:'enemy',key:e.key,hp:hp,maxHp:hp,row:erows[i]||i,col:7}); });
+  bLog(`⚔️ Бой у «${enc.name}» начался!`);
+  order=stacks.slice().sort((a,b)=>bUnit(b).speed-bUnit(a).speed); idx=0;
+  showView('battle');
+  bProcessTurn();
+}
+function bBuildOrder(){ order=stacks.filter(s=>s.hp>0).slice().sort((a,b)=>bUnit(b).speed-bUnit(a).speed); idx=0; }
+function bProcessTurn(){
+  if(battleOver) return;
+  while(idx<order.length && !stacks.find(s=>s.id===order[idx].id && s.hp>0)) idx++;
+  if(idx>=order.length){ bBuildOrder(); if(order.length===0){ renderBattle(); return; } }
+  renderBattle();
+  const cur=stacks.find(s=>s.id===order[idx].id);
+  if(cur.side==='enemy') setTimeout(()=>aiAct(cur),700);
+}
+function bEndTurn(){ idx++; checkBattleEnd(); if(!battleOver) bProcessTurn(); else renderBattle(); }
+function checkBattleEnd(){
+  const p=stacks.some(s=>s.side==='player'&&s.hp>0), e=stacks.some(s=>s.side==='enemy'&&s.hp>0);
+  if(!p){ battleOver=true; onDefeat(); } else if(!e){ battleOver=true; onVictory(); }
+}
+function checkLevelUp(){
+  while(heroExp>=expForNext()){ heroExp-=expForNext(); heroLevel++; bonusLeadership+=5; heroMagicPower+=1;
+    bLog && bLog(`🌟 Новый уровень! Герой ${heroLevel} ур. (+5 к лидерству, +1 к магической силе).`);
+  }
+}
+function onVictory(){
+  bLog('🏆 Победа!'); syncArmyFromBattle();
+  stats.battlesWon++; battleCasualties(); stats.strongestFoe=Math.max(stats.strongestFoe,lastBattleEnemyPower);
+  currentWallBonus=0;
+  const expGain=Math.max(10,Math.round(lastBattleEnemyPower/3));
+  heroExp+=expGain; bLog(`✨ Получено опыта: +${expGain}.`);
+  checkLevelUp();
+  if(curEncounter.type==='lair'){
+    const lair=curEncounter.ref;
+    const reward=Math.round((30+Math.random()*90)*goldMult()); gold+=reward; updateHud();
+    visited[key(lair.r,lair.c)+':lair']=true;
+    bLog(`Добыча: +${reward} золота.`);
+    setTimeout(()=>{ showView('map'); renderMap(); setInfo(`🏆 Победа у «${lair.name}»! +${reward} золота.`); },1300);
+  } else if(curEncounter.type==='pyramid'){
+    const pyr=curEncounter.ref;
+    visited[key(pyr.r,pyr.c)+':pyramid']=true;
+    const rewardCost=pyr.reward.reduce((s,e)=>s+e.count*UNITS[e.key].leadershipCost,0);
+    const available=leadershipMax()-leadershipUsed();
+    if(available>=rewardCost){
+      pyr.reward.forEach(e=>{
+        const addHp=e.count*UNITS[e.key].hp;
+        let existing=army.find(a=>a.key===e.key&&a.hp>0);
+        if(existing){ existing.hp+=addHp; existing.max+=addHp; }
+        else{ const slot=freeSlot(); if(slot) army.push({id:Date.now()+Math.random(),key:e.key,hp:addHp,max:addHp,zone:slot}); }
+      });
+      // выдаём следующий недостающий предмет — набор гарантированно собирается за 4 пирамиды
+      const missing=Object.keys(RITUAL_ITEMS).find(k=>!ritualItems[k]);
+      let goldReward=Math.round(150+Math.random()*150), findText, setMsg='';
+      if(missing){
+        ritualItems[missing]=true; setMsg=applyRitualBonuses();
+        const ri=RITUAL_ITEMS[missing];
+        findText=`найден(а) ${ri.name} ${ri.emoji} (+${RITUAL_MAGIC} 🔮 маг. сила)`;
+        bLog(`🔺 Авторитета достаточно! Древние существа присоединились. Найден ритуальный предмет: ${ri.emoji} ${ri.name}.`);
+      } else {
+        goldReward*=2; findText='ритуальный набор у вас уже полон — сокровищница пирамиды досталась вам целиком';
+        bLog('🔺 Авторитета достаточно! Древние существа присоединились.');
+      }
+      gold+=goldReward; updateHud();
+      setTimeout(()=>{ showView('map'); renderMap(); setInfo(`🔺 Пирамида разграблена! Войска присоединились, ${findText}, +${goldReward}💰.${setMsg}`); },1300);
+    } else {
+      bLog('⚠️ Авторитета недостаточно, чтобы удержать этих исполинов! Они выходят из-под контроля!');
+      curEncounter={type:'pyramid_rebel',ref:pyr};
+      setTimeout(()=>{ beginBattle({name:'Восставшие стражи пирамиды',enemies:pyr.reward}); },1300);
+      return;
+    }
+  } else if(curEncounter.type==='pyramid_rebel'){
+    bLog('Освобождённые стражи развеяны — награда пирамиды потеряна.');
+    setTimeout(()=>{ showView('map'); renderMap(); setInfo('🔺 Вы отбились от восставших стражей, но добыча пирамиды потеряна безвозвратно.'); },1300);
+  } else if(curEncounter.type==='capture'){
+    const city=curEncounter.ref;
+    city.owner='player'; mapPieces++;
+    const reward=Math.round((20+Math.random()*40)*goldMult()); gold+=reward; updateHud();
+    bLog(`🏴 ${city.lord} повержен(а)! «${city.name}» захвачен (${mapPieces}/${TOTAL_PIECES}).`);
+    checkLandComplete();
+    setTimeout(()=>{ openCity(city); renderCity(`Замок захвачен! +${reward}💰.`); },1300);
+  } else if(curEncounter.type==='governor_war'){
+    const gov=curEncounter.ref;
+    gov.owner='player'; mapPieces=TOTAL_PIECES;
+    const reward=Math.round((50+Math.random()*60)*goldMult()); gold+=reward; updateHud();
+    bLog(`👑 Хозяин Земли повержен! Последняя часть карты собрана (${mapPieces}/${TOTAL_PIECES})!`);
+    checkLandComplete();
+    setTimeout(()=>{ openCity(gov); renderCity(`Хозяин Земли повержен! +${reward}💰. Земля покорена полностью.`); },1300);
+  }
+}
+function onDefeat(){
+  bLog('💀 Отряд разбит и отступает...');
+  stats.battlesLost++; battleCasualties();
+  currentWallBonus=0;
+  army.forEach(a=>a.hp=Math.round(a.max*0.5));
+  gold=Math.round(gold*0.7); updateHud();
+  hero={row:CITY1.r,col:CITY1.c}; movesLeft=MOVE_BUDGET+equipBonus('movesPerDay');
+  setTimeout(()=>{ showView('map'); renderMap(); setInfo('💀 Поражение! Отряд отступил домой и частично восстановлен.'); },1300);
+}
+function doAttack(att,def){
+  const au=bUnit(att), du=bUnit(def), cnt=bCount(att);
+  const roll=Math.floor(Math.random()*(au.dmg[1]-au.dmg[0]+1))+au.dmg[0] + (att.side==='player'?equipBonus('dmg'):0);
+  const defVal=du.def + (def.side==='player'?equipBonus('def'):0) + (def.side==='enemy'?currentWallBonus:0);
+  let dmg=Math.round(cnt*roll*(1-Math.min(0.7,defVal*0.05))); dmg=Math.max(cnt,dmg);
+  def.hp-=dmg;
+  bLog(`${au.emoji} «${au.name}» бьёт: -${dmg} «${du.name}»`);
+  if(def.hp<=0){ def.hp=0; bLog(`☠️ «${du.name}» уничтожены!`); }
+  else if(!au.ranged){
+    const dCnt=bCount(def), rroll=Math.floor(Math.random()*(du.dmg[1]-du.dmg[0]+1))+du.dmg[0] + (def.side==='player'?equipBonus('dmg'):0);
+    const atkDefVal=au.def + (att.side==='player'?equipBonus('def'):0);
+    let rdmg=Math.round(dCnt*rroll*(1-Math.min(0.7,atkDefVal*0.05))*0.7); rdmg=Math.max(1,rdmg);
+    att.hp-=rdmg;
+    bLog(`${du.emoji} «${du.name}» отвечает: -${rdmg} «${au.name}»`);
+    if(att.hp<=0){ att.hp=0; bLog(`☠️ «${au.name}» уничтожены!`); }
+  }
+}
+function aiAct(stack){
+  if(battleOver) return;
+  if(stack.key!=='dragon' && stack.hp<stack.maxHp*0.3 && Math.random()<0.4){
+    stack.hp=0; stack.fled=true;
+    bLog(`🏃 «${bUnit(stack).name}» в панике бежит с поля боя!`);
+    renderBattle(); bEndTurn(); return;
+  }
+  const targets=stacks.filter(s=>s.side==='player'&&s.hp>0);
+  if(targets.length===0){ checkBattleEnd(); renderBattle(); return; }
+  targets.sort((a,b)=>dist(stack,a)-dist(stack,b));
+  const target=targets[0], d=dist(stack,target);
+  if(d<=1) doAttack(stack,target);
+  else{
+    const dr=Math.sign(target.row-stack.row), dc=Math.sign(target.col-stack.col);
+    const nr=stack.row+dr, nc=stack.col+dc;
+    if(!bOccupied(nr,nc)&&nr>=0&&nr<6&&nc>=0&&nc<8){ stack.row=nr; stack.col=nc; }
+    else if(!bOccupied(stack.row,nc)&&nc>=0&&nc<8) stack.col=nc;
+    else if(!bOccupied(nr,stack.col)&&nr>=0&&nr<6) stack.row=nr;
+    bLog(`${bUnit(stack).emoji} «${bUnit(stack).name}» двигается`);
+  }
+  renderBattle(); bEndTurn();
+}
+function dist(a,b){ return Math.max(Math.abs(a.row-b.row),Math.abs(a.col-b.col)); }
+function cellClick(r,c){
+  if(battleOver||view!=='battle') return;
+  const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
+  if(!cur||cur.side!=='player') return;
+  const u=bUnit(cur), target=stacks.find(s=>s.hp>0&&s.row===r&&s.col===c);
+  if(target && target.side==='enemy'){
+    const d=dist(cur,target);
+    if(u.ranged||d<=1){ doAttack(cur,target); renderBattle(); bEndTurn(); }
+    return;
+  }
+  if(!target){
+    const mr=Math.max(1,Math.round(u.speed/2));
+    if(dist(cur,{row:r,col:c})<=mr){ cur.row=r; cur.col=c; bLog(`${u.emoji} «${u.name}» перемещается`); renderBattle(); bEndTurn(); }
+  }
+}
+function castSpell(k){
+  if(battleOver||view!=='battle') return;
+  const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
+  if(!cur||cur.side!=='player'||!spellCharges[k]) return;
+  spellCharges[k]--; stats.spellsCast++;
+  if(k==='heal'){
+    const heal=Math.round(cur.maxHp*0.3); cur.hp=Math.min(cur.maxHp,cur.hp+heal);
+    bLog(`✨ Исцеление: +${heal} «${bUnit(cur).name}»`); renderBattle(); bEndTurn();
+  } else if(k==='fireball'){
+    const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
+    if(enemies.length){ enemies.sort((a,b)=>b.hp-a.hp); const t=enemies[0]; t.hp-=30;
+      bLog(`🔥 Огненный шар: -30 «${bUnit(t).name}»`);
+      if(t.hp<=0){ t.hp=0; bLog(`☠️ «${bUnit(t).name}» уничтожены!`); } }
+    renderBattle(); bEndTurn();
+  } else if(k==='haste'){ bLog(`💨 Ускорение: «${bUnit(cur).name}» получает доп. ход!`); renderBattle(); }
+  else if(k==='multiply'){
+    const mult=1.25+Math.random()*0.25;
+    const before=Math.ceil(cur.hp/bUnit(cur).hp);
+    cur.hp=Math.round(cur.hp*mult); cur.maxHp=Math.round(cur.maxHp*mult);
+    const after=Math.ceil(cur.hp/bUnit(cur).hp);
+    bLog(`🐣 Размножение: «${bUnit(cur).name}» ×${before}→×${after}`);
+    renderBattle(); bEndTurn();
+  } else if(k==='resurrect'){
+    cur.hp=cur.maxHp;
+    bLog(`💫 Воскрешение: «${bUnit(cur).name}» полностью восстановлен!`);
+    renderBattle(); bEndTurn();
+  } else if(k==='infection'){
+    const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
+    if(enemies.length){
+      enemies.sort((a,b)=>b.hp-a.hp);
+      const main=enemies[0]; main.hp-=35;
+      bLog(`🦠 Зараза: -35 «${bUnit(main).name}»`);
+      if(main.hp<=0){ main.hp=0; bLog(`☠️ «${bUnit(main).name}» уничтожены!`); }
+      const neighbors=enemies.filter(e=>e!==main && dist(main,e)<=1);
+      neighbors.forEach(n=>{
+        n.hp-=15;
+        bLog(`🦠 Зараза распространилась: -15 «${bUnit(n).name}»`);
+        if(n.hp<=0){ n.hp=0; bLog(`☠️ «${bUnit(n).name}» уничтожены!`); }
+      });
+    }
+    renderBattle(); bEndTurn();
+  }
+}
+function renderBattle(){
+  const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
+  let html='';
+  for(let r=0;r<6;r++) for(let c=0;c<8;c++){
+    let cls='cell'+(((r+c)%2)?' alt':'');
+    const occ=stacks.find(s=>s.hp>0&&s.row===r&&s.col===c);
+    if(cur&&cur.side==='player'){
+      const u=bUnit(cur);
+      if(occ){ if(occ.id===cur.id) cls+=' selected'; else if(occ.side==='enemy'){ const d=dist(cur,occ); if(u.ranged||d<=1) cls+=' attackable'; } }
+      else{ const mr=Math.max(1,Math.round(u.speed/2)); if(dist(cur,{row:r,col:c})<=mr) cls+=' reachable'; }
+    }
+    let inner=''; if(occ){ const uu=bUnit(occ); inner=`<div class="unit ${occ.side}">${uu.emoji}<span class="count-badge">${bCount(occ)}</span></div>`; }
+    html+=`<div class="${cls}" onclick="cellClick(${r},${c})">${inner}</div>`;
+  }
+  document.getElementById('battlefield').innerHTML=html;
+  const tw=document.getElementById('turnwho'), wb=document.getElementById('waitBtn'), rb=document.getElementById('retreatBtn');
+  if(battleOver){ tw.textContent='Бой окончен'; wb.disabled=true; rb.disabled=true; }
+  else if(cur){ tw.textContent=`${bUnit(cur).emoji} ${bUnit(cur).name} — ${cur.side==='player'?'ваш ход':'ход врага'}`; wb.disabled=cur.side!=='player'; rb.disabled=cur.side!=='player'; }
+  const log=document.getElementById('log'); log.innerHTML=logLines.map(l=>`<div>${l}</div>`).join(''); log.scrollTop=log.scrollHeight;
+  const sb=document.getElementById('spellbar'); let sbHtml='';
+  SPELLS.forEach(sp=>{ const owned=spellCharges[sp.key]||0; const enabled=!battleOver&&cur&&cur.side==='player'&&owned>0;
+    sbHtml+=`<button class="secondary" ${enabled?'':'disabled'} onclick="castSpell('${sp.key}')">${sp.emoji} ${sp.name} (${owned})</button>`; });
+  sb.innerHTML=sbHtml;
+}
+
+/* ================= MAP RENDER (camera viewport) ================= */
+/* ================= ADAPTIVE LAYOUT =================
+   Вертикально: карта 13 клеток в ширину, строк — сколько влезает по высоте (клетка ≈ ширина/13).
+   Горизонтально: карта слева на всю высоту, справа колонка; столбцов — сколько влезает.
+   Числа клеток нечётные, чтобы герой был ровно в центре. */
+const TILE_MIN=30, TILE_MAX=48;
+function odd(n){ return n%2?n:n-1; }
+function clampN(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function isLandscape(){ return window.innerWidth>window.innerHeight*1.15 && window.innerWidth>=560; }
+function layoutViewport(){
+  const W=window.innerWidth, H=window.innerHeight, land=isLandscape();
+  document.body.classList.toggle('land',land);
+  const mapEl=document.getElementById('map'), bf=document.getElementById('battlefield');
+  const cs=getComputedStyle(document.body);
+  const padX=parseFloat(cs.paddingLeft)+parseFloat(cs.paddingRight), padY=parseFloat(cs.paddingTop)+parseFloat(cs.paddingBottom);
+  const frame=10; // рамка + внутренний отступ карты
+  let rows, cols, tile;
+  if(land){
+    const side=clampN(Math.round(W*0.3),230,320);
+    document.body.style.setProperty('--side',side+'px');
+    const availH=H-padY-frame-2, availW=W-padX-side-10-frame;
+    rows=odd(clampN(Math.floor(availH/31),7,17));
+    tile=Math.min(TILE_MAX,Math.floor(availH/rows));
+    cols=odd(clampN(Math.floor(availW/tile),9,25));
+    tile=Math.min(tile,Math.floor(availW/cols));
+    // поле боя 8×6 слева на всю высоту
+    const bh=Math.min(availH+frame, (availW+frame)*6/8);
+    bf.style.height=Math.floor(bh)+'px'; bf.style.width=Math.floor(bh*8/6)+'px'; bf.style.maxWidth='none'; bf.style.aspectRatio='auto';
+    bf.style.setProperty('--bunit',Math.floor(bh/6*0.5)+'px');
+    document.body.style.setProperty('--appH',(H-padY)+'px');
+  } else {
+    document.body.style.removeProperty('--side'); document.body.style.removeProperty('--appH');
+    bf.style.height=''; bf.style.width=''; bf.style.maxWidth=''; bf.style.aspectRatio='';
+    bf.style.setProperty('--bunit',Math.floor(Math.min(560,W-padX)/8*0.48)+'px');
+    const availW=Math.min(680,W-padX)-frame;
+    cols=13; tile=Math.floor(availW/cols);
+    if(tile>TILE_MAX){ tile=TILE_MAX; }
+    // высота: всё, что не занято заголовком, панелью, сообщением (резерв) и кнопками
+    const h1=document.getElementById('titleH1').offsetHeight+10;
+    const hud=document.getElementById('hud').offsetHeight+10;
+    const ctr=(document.getElementById('controls').offsetHeight||44)+10;
+    const infoReserve=96;
+    const availH=H-padY-h1-hud-ctr-infoReserve-frame;
+    rows=odd(clampN(Math.floor(availH/tile),9,21));
+  }
+  const changed=rows!==VIEW_ROWS||cols!==VIEW_COLS;
+  VIEW_ROWS=rows; VIEW_COLS=cols;
+  mapEl.style.gridTemplateColumns=`repeat(${cols},${tile}px)`;
+  mapEl.style.gridTemplateRows=`repeat(${rows},${tile}px)`;
+  mapEl.style.setProperty('--tile',tile+'px');
+  return changed;
+}
+let layoutTimer=null;
+function relayout(){
+  clearTimeout(layoutTimer);
+  layoutTimer=setTimeout(()=>{ layoutViewport(); if(booted&&terrainGrid.length) renderMap(); },120);
+}
+window.addEventListener('resize',relayout);
+window.addEventListener('orientationchange',relayout);
+(function(){
+  const tg=window.Telegram&&window.Telegram.WebApp; if(!tg) return;
+  try{ tg.onEvent&&tg.onEvent('viewportChanged',e=>{ if(!e||e.isStateStable!==false) relayout(); }); }catch(e){}
+  // в Telegram вертикальный свайп по карте не должен сворачивать приложение
+  try{ if(tg.initData&&tg.disableVerticalSwipes) tg.disableVerticalSwipes(); }catch(e){}
+})();
+
+function renderMap(){
+  saveSoon();
+  const dist=dijkstra(); let html='';
+  const camRow=Math.max(0,Math.min(ROWS-VIEW_ROWS, hero.row-Math.floor(VIEW_ROWS/2)));
+  const camCol=Math.max(0,Math.min(COLS-VIEW_COLS, hero.col-Math.floor(VIEW_COLS/2)));
+  for(let rr=0;rr<VIEW_ROWS;rr++) for(let cc=0;cc<VIEW_COLS;cc++){
+    const r=camRow+rr, c=camCol+cc;
+    const t=TERRAIN[tch(r,c)];
+    const reach=dist[key(r,c)]!==undefined && !(r===hero.row&&c===hero.col);
+    const canModify=!reach && adjacent(r,c) && (tch(r,c)==='f'||tch(r,c)==='w'||tch(r,c)==='m');
+    let icon='';
+    if(r===hero.row&&c===hero.col) icon=onShip?'⛵':'🧝';
+    else if(shipPos && r===shipPos.r && c===shipPos.c) icon='⛵';
+    else if(sorcerer && sorcerer.active && r===sorcerer.r && c===sorcerer.c) icon='🌑';
+    else{ const p=poiAt(r,c); if(p) icon = (p.type==='castle'||p.type==='governor') ? (p.owner==='player'?p.emoji:(p.wallHp<=0?'🏴💥':p.type==='governor'?'👑':'🏴')) : p.emoji; }
+    html+=`<div class="tile${reach?' reachable':''}${canModify?' modifiable':''}" style="background:${t.color}" onclick="tileClick(${r},${c})"><span class="icon">${icon}</span></div>`;
+  }
+  document.getElementById('map').innerHTML=html;
+  updateHud();
+}
+
+/* ================= WIRING ================= */
+document.getElementById('waitBtn').onclick=()=>{
+  const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
+  if(cur&&cur.side==='player'){ bLog(`${bUnit(cur).emoji} «${bUnit(cur).name}» пропускает ход`); bEndTurn(); }
+};
+document.getElementById('retreatBtn').onclick=()=>{
+  if(battleOver||view!=='battle') return;
+  const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
+  if(!cur||cur.side!=='player') return;
+  battleOver=true; syncArmyFromBattle();
+  stats.retreats++; battleCasualties();
+  bLog('🏳️ Отряд отступает с поля боя!'); renderBattle();
+  setTimeout(()=>{ showView('map'); renderMap(); setInfo('🏳️ Вы отступили без потерь армии, но без трофеев.'); },1000);
+};
+/* ================= MENU / MODAL ================= */
+let modalLocked=false;
+function openModal(html,locked){
+  modalLocked=!!locked;
+  document.getElementById('modalCard').innerHTML=html;
+  document.getElementById('modal').classList.remove('hidden');
+  syncBackButton();
+}
+/* Системная кнопка «Назад» Telegram: закрывает окно или возвращает на карту, а не закрывает игру. */
+function modalOpen(){ return !document.getElementById('modal').classList.contains('hidden'); }
+function backAction(){
+  if(modalOpen()){ if(!modalLocked) closeModal(); return; }
+  if(view==='city'){ leaveCity(); renderMap(); }
+  else if(view==='stats'&&gameOverPermanent){ showView('gameover'); }
+  else if(['inventory','army','stats'].includes(view)){ showView('map'); renderMap(); }
+  syncBackButton();
+}
+function syncBackButton(){
+  const tg=window.Telegram&&window.Telegram.WebApp; if(!tg||!tg.initData||!tg.BackButton) return;
+  const need=(modalOpen()&&!modalLocked) || ['city','inventory','army','stats'].includes(view);
+  try{ need?tg.BackButton.show():tg.BackButton.hide(); }catch(e){}
+}
+(function(){ const tg=window.Telegram&&window.Telegram.WebApp; if(tg&&tg.initData&&tg.BackButton){ try{ tg.BackButton.onClick(backAction); }catch(e){} } })();
+function closeModal(){
+  // возвращаем кнопки меню на место, чтобы обработчики сохранились
+  const list=document.getElementById('menuList');
+  if(list && list.parentElement.id!=='menuButtons') document.getElementById('menuButtons').appendChild(list);
+  document.getElementById('modal').classList.add('hidden'); modalLocked=false;
+  syncBackButton();
+}
+document.getElementById('modal').addEventListener('click',e=>{ if(e.target.id==='modal' && !modalLocked) closeModal(); });
+function openMenu(){
+  openModal(`<h2>☰ Меню</h2>
+    <div class="modalNote">${contCfg().emoji} ${contCfg().name} · день ${day} · ${hardMode?'⚔️ жёсткий режим':'🛡️ обычный режим'}</div>
+    <div id="menuSlot"></div>
+    <button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Закрыть</button>
+    <div class="modalNote" style="text-align:center;margin-top:10px;font-size:11.5px;">Морвейн v${GAME_VERSION} · сборка ${GAME_BUILD}</div>`);
+  document.getElementById('menuSlot').appendChild(document.getElementById('menuList'));
+  const inBattle=view==='battle';
+  ['saveBtn','loadBtn','statsBtn','restartBtn'].forEach(id=>document.getElementById(id).disabled=inBattle);
+}
+document.getElementById('menuBtn').onclick=openMenu;
+document.getElementById('hudMoreBtn').onclick=()=>{
+  const m=document.getElementById('hudMore'), open=m.classList.toggle('hidden');
+  document.getElementById('hudMoreBtn').textContent=open?'▾':'▴';
+  relayout();
+};
+document.getElementById('legendBtn').onclick=()=>{
+  closeModal();
+  openModal(`<h2>🗺️ Легенда карты</h2>${document.getElementById('legendSrc').innerHTML}
+    <div class="modalNote" style="margin-top:10px;">Зелёная рамка — куда можно дойти сегодня. Золотая — клетка, которую можно изменить работником (лес, скалы, вода) или где ждёт корабль.</div>
+    <button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Закрыть</button>`);
+};
+/* Справочник: только то, что игрок видел своими глазами (города с флагом seen). */
+let journalTab='cities';
+function journalData(){
+  stashWorld();
+  return worlds.map((w,i)=>w?{i,cfg:CONTINENTS[i],cities:w.pois.filter(p=>p.type==='city')}:null).filter(Boolean);
+}
+function goodsLine(sh){
+  const parts=[];
+  if(sh.spells.length) parts.push('📜 '+sh.spells.map(k=>{ const s=spellByKey(k); return `${s.emoji} ${s.name}`; }).join(', '));
+  if(sh.items.length) parts.push('⚔️ '+sh.items.map(id=>`${ITEMS[id].emoji} ${ITEMS[id].name} ${tierStars(ITEMS[id].tier)}${sh.rare===id?' (редк.)':''}`).join(', '));
+  if(sh.workers.length) parts.push('👷 '+sh.workers.map(w=>`${WORKERS[w].emoji} ${WORKERS[w].name}`).join(', '));
+  return parts.join('<br>');
+}
+function openJournal(tab){
+  if(tab) journalTab=tab;
+  const data=journalData(); let body='';
+  const tabs=`<div style="display:flex;gap:6px;margin:6px 0 10px;">
+    <button class="${journalTab==='cities'?'':'secondary'}" onclick="openJournal('cities')">По городам</button>
+    <button class="${journalTab==='goods'?'':'secondary'}" onclick="openJournal('goods')">Где купить</button></div>`;
+  if(journalTab==='cities'){
+    data.forEach(d=>{
+      body+=`<div class="statSection">${d.cfg.emoji} ${d.cfg.name}${d.i===curCont?' (вы здесь)':''}</div>`;
+      d.cities.forEach(c=>{
+        body+=`<div class="row" style="display:block;"><b>${c.emoji} ${c.name}</b> ${c.seen&&c.shop?`<span style="color:var(--accent);font-size:12px;">${c.shop.title}</span><div class="armyline">${goodsLine(c.shop)||'только найм и рынок'}</div>`:`<span class="armyline">— ещё не посещён</span>`}</div>`;
+      });
+    });
+  } else {
+    // обратный указатель: товар → города, где его видели
+    const idx={};
+    data.forEach(d=>d.cities.forEach(c=>{ if(!c.seen||!c.shop) return;
+      const where=`${c.name} (${d.cfg.emoji})`;
+      c.shop.spells.forEach(k=>(idx['s:'+k]=idx['s:'+k]||[]).push(where));
+      c.shop.items.forEach(id=>(idx['i:'+id]=idx['i:'+id]||[]).push(where));
+      c.shop.workers.forEach(w=>(idx['w:'+w]=idx['w:'+w]||[]).push(where));
+    }));
+    const line=(label,list)=>`<div class="row"><span>${label}</span><span class="armyline" style="text-align:right;margin:0;">${list?list.join(', '):'—'}</span></div>`;
+    body+=`<div class="statSection">Заклинания</div>`;
+    allSpells().forEach(s=>body+=line(`${s.emoji} ${s.name}`,idx['s:'+s.key]));
+    body+=`<div class="statSection">Снаряжение</div>`;
+    Object.entries(ITEMS).filter(([id])=>idx['i:'+id]).forEach(([id,it])=>body+=line(`${it.emoji} ${it.name} ${tierStars(it.tier)}`,idx['i:'+id]));
+    if(!Object.keys(idx).some(k=>k.startsWith('i:'))) body+=`<div class="armyline">Пока не встречено.</div>`;
+    body+=`<div class="statSection">Работники</div>`;
+    Object.entries(WORKERS).forEach(([w,wk])=>body+=line(`${wk.emoji} ${wk.name}`,idx['w:'+w]));
+  }
+  openModal(`<h2>📖 Справочник городов</h2><div class="modalNote">Записано всё, что вы видели в посещённых городах.</div>${tabs}${body}
+    <button class="secondary" style="margin-top:12px;width:100%;" onclick="closeModal()">Закрыть</button>`);
+}
+document.getElementById('journalBtn').onclick=()=>{ closeModal(); openJournal(); };
+function bugReportText(){
+  const tg=window.Telegram&&window.Telegram.WebApp;
+  const plat=tg&&tg.initData?`Telegram ${tg.platform||'?'} (API ${tg.version||'?'})`:navigator.userAgent.slice(0,120);
+  return [
+    `Морвейн v${GAME_VERSION} (${GAME_BUILD})`,
+    `Платформа: ${plat}`,
+    `Экран: ${innerWidth}×${innerHeight}, ${isLandscape()?'горизонтально':'вертикально'}, окно ${VIEW_COLS}×${VIEW_ROWS}`,
+    `Режим: ${hardMode?'жёсткий':'обычный'}; земля: ${contCfg().name}; день ${day}; экран: ${view}`,
+    `Сохранение: ${CLOUD_OK?'облако Telegram':'устройство'}`,
+    `Ошибки: ${recentErrors.length?recentErrors.join(' | '):'нет'}`,
+    '',
+    'Что произошло: '
+  ].join('\n');
+}
+function openBugReport(){
+  const txt=bugReportText();
+  openModal(`<h2>🐞 Сообщить об ошибке</h2>
+    <div class="modalNote">Скопируйте отчёт, допишите, что произошло, и отправьте разработчику. Технические данные помогут найти причину.</div>
+    <textarea id="bugText" readonly style="width:100%;height:150px;margin-top:8px;font-size:11.5px;background:var(--panel2);color:var(--text);border:1px solid var(--accent);border-radius:6px;padding:6px;">${txt.replace(/</g,'&lt;')}</textarea>
+    <button style="width:100%;margin-top:8px;" onclick="copyBugReport()">📋 Скопировать отчёт</button>
+    ${FEEDBACK_USERNAME?`<button class="secondary" style="width:100%;margin-top:8px;" onclick="contactDev()">✉️ Написать разработчику</button>`:''}
+    <div id="bugCopied" class="modalNote" style="margin-top:6px;"></div>
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeModal()">Закрыть</button>`);
+}
+async function copyBugReport(){
+  const ta=document.getElementById('bugText'), out=document.getElementById('bugCopied');
+  try{ await navigator.clipboard.writeText(ta.value); out.textContent='✅ Скопировано.'; }
+  catch(e){ try{ ta.removeAttribute('readonly'); ta.select(); document.execCommand('copy'); ta.setAttribute('readonly',''); out.textContent='✅ Скопировано.'; }catch(e2){ out.textContent='Выделите текст и скопируйте вручную.'; } }
+}
+function contactDev(){
+  const url='https://t.me/'+FEEDBACK_USERNAME, tg=window.Telegram&&window.Telegram.WebApp;
+  if(tg&&tg.initData&&tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url,'_blank');
+}
+document.getElementById('bugBtn').onclick=()=>{ closeModal(); openBugReport(); };
+const GAME_INTRO=`Пять земель по 80×60 клеток, каждая опаснее предыдущей. В каждой — 5 городов и 8 замков: покорите землю целиком, чтобы открыть путь к следующей. Между землями плавают из любой пристани — корабль плывёт с вами.`;
+function openNewGame(first){
+  openModal(`<h2>${first?'⚔️ Добро пожаловать в Морвейн':'🔄 Новая игра'}</h2>
+    <div class="modalNote">${GAME_INTRO}</div>
+    ${first?'':`<div class="modalNote" style="color:var(--bad);margin-top:8px;">Текущая партия и её сохранение будут стёрты.</div>`}
+    <div class="modalNote" style="margin-top:10px;color:var(--text);"><b>Выберите режим</b> — изменить его в этой партии будет нельзя:</div>
+    <button class="modeBtn" onclick="beginGame(false,${first})">🛡️ Обычный<small>Автосохранение каждое утро, сохранение и загрузка в любой момент — неудачу можно переиграть.</small></button>
+    <button class="modeBtn secondary" onclick="beginGame(true,${first})">⚔️ Жёсткий<small>Игра сохраняется после каждого действия, загрузок нет. Штурм замка без армии и гибель героя необратимы.</small></button>
+    ${first?'':`<button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Отмена</button>`}`, first);
+}
+function beginGame(hard,first){
+  closeModal();
+  if(first){
+    // мир уже сгенерирован при запуске — просто фиксируем режим
+    hardMode=hard; updateSaveButtons(); updateHud(); saveSoon(true);
+    setInfo(hard?'⚔️ Жёсткий режим: каждое действие окончательно. Удачи!':'🛡️ Обычный режим: игра сохраняется каждое утро, сохраниться можно и через меню ☰.');
+  } else doRestart(hard);
+}
+document.getElementById('invBtn').onclick=openInventory;
+document.getElementById('armyBtn').onclick=openArmyView;
+document.getElementById('magicBtn').onclick=openAdventureMagic;
+document.getElementById('nextDayBtn').onclick=()=>{
+  day++; movesLeft=MOVE_BUDGET+equipBonus('movesPerDay');
+  let msg=`📅 День ${day}. Ходы восстановлены.`;
+  if((day-1)%7===0){
+    week++;
+    const income=allPois().filter(p=>p.type==='city'||((p.type==='castle'||p.type==='governor')&&p.owner==='player')).reduce((s,p)=>s+(p.tax||0),0)+equipBonus('goldPerWeek')+governorWage;
+    const upkeep=army.filter(a=>a.hp>0).reduce((s,a)=>s+Math.ceil(a.hp/UNITS[a.key].hp)*UNITS[a.key].upkeep,0);
+    gold+=income-upkeep;
+    allPois().forEach(p=>{ if(p.recruit) p.recruit.forEach(r=>{ if(!r.noRestock) r.stock=Math.min(r.maxStock, r.stock+Math.ceil(r.maxStock/2)); }); });
+    msg+=` 📆 Неделя ${week}: доход +${income}💰, содержание армии -${upkeep}💰. Запасы найма пополнены.`;
+    if(gold<0){ msg+=' ⚠️ Казна пуста!'; gold=0; }
+  }
+  updateHud(); setInfo(msg); renderMap();
+  saveSoon(true);
+};
+document.getElementById('restartBtn').onclick=()=>{ if(view==='battle') return; closeModal(); openNewGame(false); };
+function doRestart(hard){
+  hardMode=!!hard;
+  gold=150; day=1; week=1; movesLeft=MOVE_BUDGET; visited={};
+  mapPieces=0; questState='available'; landComplete=false; hasShip=false; bonusLeadership=0;
+  heroLevel=1; heroExp=0; onShip=false; shipPos=null; lastWaterPos=null;
+  equipment={weapon:null,armor:null,helmet:null,amulet:null}; inventory=[];
+  army=[{id:1,key:'swordsmen',hp:150,max:150,zone:'active'},{id:2,key:'archers',hp:64,max:64,zone:'active'},{id:3,key:'knights',hp:105,max:105,zone:'active'},{id:4,key:'mages',hp:12,max:12,zone:'active'}];
+  workers={lumberjack:2,carpenter:1,stonemason:0};
+  gameOverPermanent=false;
+  ritualItems={cup:false,wand:false,dagger:false,pentacle:false}; ritualGranted=0; ritualSetDone=false;
+  governorWage=0; heroMagicPower=5; quasiExpireWeek=0; quasiBonus=0;
+  spellCharges={heal:0,fireball:0,haste:0,multiply:0,resurrect:0,infection:0,towngate:0,givearmy:0,quasi:0,tornado:0};
+  stats=freshStats(); lastGoldSeen=gold; gameOverReason='';
+  startNewWorld();
+  showView('map'); setInfo('Новый мир сгенерирован.'); renderMap();
+  saveSoon(true); updateSaveButtons();
+}
+
+/* ================= SAVE / LOAD =================
+   Снимок всего состояния в JSON. Рельеф каждой земли — RLE-строкой (4800 клеток → ~1–2 тыс. символов).
+   Хранилища:
+   • Telegram CloudStorage — когда игра открыта внутри Telegram (сохранение привязано к аккаунту, переживает смену телефона).
+     Лимит 4096 символов на значение → режем на куски; пишем в чередующиеся слоты A/B, мету — последней,
+     чтобы оборванная запись не испортила прошлое сохранение.
+   • localStorage — всегда, как быстрый локальный кэш; вне Telegram (браузер, будущий Android WebView) — основное.
+   При загрузке берётся более свежее из двух по savedAt. Во время боя сохранение не пишется.
+   Когда пишется:
+   • обычный режим — автосохранение в начале каждого дня и при плавании в другую землю, плюс кнопка «Сохранить».
+     Неудачный эпизод можно переиграть кнопкой «Загрузить».
+   • жёсткий режим — непрерывно после каждого действия и при сворачивании приложения: переиграть ничего нельзя. */
+const SAVE_VERSION=1, SAVE_KEY='morveyn_save_v1', CLOUD_PREFIX='mv1', CLOUD_CHUNK=4000;
+const TG=(window.Telegram&&window.Telegram.WebApp)||null;
+const CLOUD_OK=!!(TG && TG.initData && TG.CloudStorage && (!TG.isVersionAtLeast || TG.isVersionAtLeast('6.9')));
+if(TG && TG.initData){ try{ TG.ready(); TG.expand(); }catch(e){} }
+
+function rleEncode(grid){
+  let out='', prev=null, n=0;
+  const flush=()=>{ if(prev!==null) out+=(n>1?n:'')+prev; };
+  for(const row of grid) for(const ch of row){ if(ch===prev) n++; else { flush(); prev=ch; n=1; } }
+  flush(); return out;
+}
+function rleDecode(str){
+  const flat=[]; let num='';
+  for(const ch of str){ if(ch>='0'&&ch<='9') num+=ch; else { const n=num?parseInt(num,10):1; for(let i=0;i<n;i++) flat.push(ch); num=''; } }
+  const grid=[]; for(let r=0;r<ROWS;r++) grid.push(flat.slice(r*COLS,(r+1)*COLS));
+  return grid;
+}
+function serializeGame(){
+  stashWorld(); tickPlaytime();
+  return JSON.stringify({
+    v:SAVE_VERSION, savedAt:Date.now(), worldSeed, curCont, unlocked,
+    worlds:worlds.map(w=>w?{terrain:rleEncode(w.terrainGrid),pois:w.pois,sorcerer:w.sorcerer,CITY1:w.CITY1,visited:w.visited,
+      mapPieces:w.mapPieces,landComplete:w.landComplete,questState:w.questState,arrival:w.arrival}:null),
+    hero, gold, day, week, movesLeft, hasShip, onShip, shipPos, lastWaterPos, bonusLeadership,
+    heroLevel, heroExp, heroMagicPower, quasiExpireWeek, quasiBonus,
+    equipment, inventory, army, spellCharges, workers, hardMode, gameOverPermanent, gameOverReason,
+    ritualItems, ritualGranted, ritualSetDone, governorWage, stats
+  });
+}
+function restoreGame(json){
+  let d; try{ d=JSON.parse(json); }catch(e){ return false; }
+  if(!d || d.v!==SAVE_VERSION || !Array.isArray(d.worlds) || !d.worlds[d.curCont]) return false;
+  worldSeed=d.worldSeed; unlocked=d.unlocked;
+  worlds=d.worlds.map(w=>w?{terrainGrid:rleDecode(w.terrain),pois:w.pois,sorcerer:w.sorcerer,CITY1:w.CITY1,visited:w.visited||{},
+    mapPieces:w.mapPieces,landComplete:w.landComplete,questState:w.questState,arrival:w.arrival}:null);
+  curCont=d.curCont;
+  // старые сохранения: у городов ещё нет ассортимента — раздаём его (детерминированно от сида и номера земли)
+  worlds.forEach((w,i)=>{ if(w && w.pois.some(p=>p.type==='city'&&!p.shop)) assignShops(w.pois,CONTINENTS[i].tier,mulberry32((d.worldSeed||1)+i*104729)); });
+  // предметы, которых больше нет в каталоге, убираем
+  if(Array.isArray(d.inventory)) d.inventory=d.inventory.filter(id=>ITEMS[id]);
+  if(d.equipment) Object.keys(d.equipment).forEach(sl=>{ if(d.equipment[sl]&&!ITEMS[d.equipment[sl]]) d.equipment[sl]=null; });
+  // подключаем текущую землю напрямую (без stashWorld — иначе затрём загруженное пустыми глобалами)
+  ({terrainGrid,pois,sorcerer,CITY1,visited,mapPieces,landComplete,questState}=worlds[curCont]);
+  ({hero,gold,day,week,movesLeft,hasShip,onShip,shipPos,lastWaterPos,bonusLeadership,heroLevel,heroExp,heroMagicPower,
+    quasiExpireWeek,quasiBonus,equipment,inventory,army,spellCharges,workers,hardMode,gameOverPermanent,ritualItems,governorWage}=d);
+  gameOverReason=d.gameOverReason||'';
+  // старые сохранения не знали о бонусах ритуальных предметов — выдаём положенное за уже найденные
+  ritualGranted=typeof d.ritualGranted==='number'?d.ritualGranted:0; ritualSetDone=!!d.ritualSetDone;
+  applyRitualBonuses();
+  stats=Object.assign(freshStats(),d.stats||{});
+  lastGoldSeen=gold; lastTick=Date.now();
+  return true;
+}
+
+const LocalStore={
+  save(str){ try{ localStorage.setItem(SAVE_KEY,str); return true; }catch(e){ return false; } },
+  load(){ try{ return localStorage.getItem(SAVE_KEY); }catch(e){ return null; } },
+  clear(){ try{ localStorage.removeItem(SAVE_KEY); }catch(e){} }
+};
+const CloudStore={
+  slot:null,
+  call(fn,...args){ return new Promise((res,rej)=>{ try{ TG.CloudStorage[fn](...args,(err,val)=>err?rej(err):res(val)); }catch(e){ rej(e); } }); },
+  async save(str){
+    if(this.slot===null){ try{ const m=JSON.parse(await this.call('getItem',CLOUD_PREFIX+'_meta')||'null'); this.slot=m?m.slot:'b'; }catch(e){ this.slot='b'; } }
+    const slot=this.slot==='a'?'b':'a', n=Math.ceil(str.length/CLOUD_CHUNK);
+    await Promise.all(Array.from({length:n},(_,i)=>this.call('setItem',`${CLOUD_PREFIX}_${slot}${i}`,str.slice(i*CLOUD_CHUNK,(i+1)*CLOUD_CHUNK))));
+    await this.call('setItem',CLOUD_PREFIX+'_meta',JSON.stringify({slot,n,len:str.length}));
+    this.slot=slot;
+  },
+  async load(){
+    const m=JSON.parse(await this.call('getItem',CLOUD_PREFIX+'_meta')||'null'); if(!m) return null;
+    const keys=Array.from({length:m.n},(_,i)=>`${CLOUD_PREFIX}_${m.slot}${i}`);
+    const vals=await this.call('getItems',keys);
+    const str=keys.map(k=>vals[k]||'').join('');
+    this.slot=m.slot;
+    return str.length===m.len?str:null;
+  }
+};
+function withTimeout(promise,ms){ return Promise.race([promise,new Promise(res=>setTimeout(()=>res(null),ms))]); }
+
+let localTimer=null, cloudTimer=null, cloudBusy=false, cloudPending=false, booted=false;
+function setSaveBadge(t){ const b=document.getElementById('saveBadge'); if(b) b.textContent=t; }
+let lastSaveLabel='';
+function saveLocalNow(){
+  if(!booted||view==='battle') return;
+  LocalStore.save(serializeGame());
+  lastSavedPrint=progressPrint(); syncClosingGuard();
+  lastSaveLabel=`день ${day}`;
+  if(!CLOUD_OK) setSaveBadge(`💾 ${lastSaveLabel}`);
+}
+async function saveCloudNow(){
+  if(!booted||!CLOUD_OK||view==='battle') return;
+  if(cloudBusy){ cloudPending=true; return; }
+  cloudBusy=true; setSaveBadge('☁️…');
+  try{ await CloudStore.save(serializeGame()); setSaveBadge(`☁️ ${lastSaveLabel||'✓'}`); }
+  catch(e){ setSaveBadge('☁️✗'); }
+  cloudBusy=false;
+  if(cloudPending){ cloudPending=false; saveCloudNow(); }
+}
+/* Локально — почти сразу (0.3 с), в облако — реже (4 с тишины), immediate — для важных моментов. */
+/* «Отпечаток» прогресса: если он отличается от сохранённого — есть что терять, и при закрытии спросим подтверждение. */
+let lastSavedPrint='';
+function progressPrint(){
+  return JSON.stringify([curCont,hero&&hero.row,hero&&hero.col,gold,day,movesLeft,army.map(a=>a.hp),inventory.length,equipment,
+    spellCharges,workers,stats.battlesWon+stats.battlesLost+stats.retreats,stats.chestsOpened,stats.forestCut+stats.rocksBroken+stats.bridgesBuilt,mapPieces]);
+}
+function syncClosingGuard(){
+  const dirty=booted && !hardMode && !gameOverPermanent && progressPrint()!==lastSavedPrint;
+  const tg=window.Telegram&&window.Telegram.WebApp;
+  if(tg&&tg.initData){ try{ dirty?tg.enableClosingConfirmation():tg.disableClosingConfirmation(); }catch(e){} }
+  window.__morveynDirty=dirty;
+}
+window.addEventListener('beforeunload',e=>{ if(window.__morveynDirty){ e.preventDefault(); e.returnValue=''; } });
+function saveSoon(immediate){
+  if(!booted) return;
+  if(!immediate && !hardMode){ syncClosingGuard(); return; } // обычный режим: только явные точки сохранения
+  clearTimeout(localTimer); localTimer=setTimeout(saveLocalNow,immediate?0:300);
+  if(CLOUD_OK){ clearTimeout(cloudTimer); cloudTimer=setTimeout(saveCloudNow,immediate?50:4000); }
+}
+function flushSaves(){ if(!booted||!hardMode) return; clearTimeout(localTimer); saveLocalNow(); if(CLOUD_OK){ clearTimeout(cloudTimer); saveCloudNow(); } }
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flushSaves(); else lastTick=Date.now(); });
+window.addEventListener('pagehide',flushSaves);
+setInterval(()=>{ if(booted) tickPlaytime(); },15000);
+
+/* ================= STATS VIEW ================= */
+function fmtNum(n){ return Math.round(n).toLocaleString('ru-RU'); }
+function fmtTime(ms){ const m=Math.floor(ms/60000), h=Math.floor(m/60); return h?`${h} ч ${m%60} мин`:`${m} мин`; }
+function totalDays(){ return day; }
+function openStats(victory){
+  tickPlaytime();
+  if(view!=='battle') showView('stats');
+  const S=stats, lands=worlds.filter(Boolean).length, pieces=worlds.filter(Boolean).reduce((a,w)=>a+(w===worlds[curCont]?mapPieces:w.mapPieces),0);
+  const castles=capturedTotal(), armyPow=power(activeStacks().concat(reserveStacks()).map(a=>({key:a.key,count:Math.ceil(a.hp/UNITS[a.key].hp)})),false);
+  const cell=(v,l)=>`<div class="statCell"><div class="sv">${v}</div><div class="sl">${l}</div></div>`;
+  const facts=[];
+  const km=Math.round((S.tilesWalked+S.tilesSailed)*3.5);
+  if(km>0) facts.push(`🥾 Если считать клетку за 3,5 км, вы преодолели около <b>${fmtNum(km)} км</b>${km>2000?' — больше, чем от Варшавы до Мадрида':km>700?' — как от Варшавы до Берлина и обратно':''}.`);
+  if(S.forestCut>0) facts.push(`🪓 Вырубленного леса хватило бы на <b>${fmtNum(S.forestCut*40)}</b> брёвен для частокола.`);
+  if(S.enemiesSlain>0&&S.troopsLost>0) facts.push(`⚖️ На каждого павшего вашего воина пришлось <b>${(S.enemiesSlain/S.troopsLost).toFixed(1)}</b> поверженных врагов.`);
+  else if(S.enemiesSlain>0) facts.push(`🛡️ Вы сразили <b>${fmtNum(S.enemiesSlain)}</b> врагов, не потеряв ни одного воина. Легендарно.`);
+  if(S.sorcererCaught>0) facts.push(`🌑 Чёрный Колдун настигал вас <b>${S.sorcererCaught}</b> раз${S.sorcererCaught%10>=2&&S.sorcererCaught%10<=4&&(S.sorcererCaught<10||S.sorcererCaught>20)?'а':''}.`);
+  else facts.push('🌑 Чёрный Колдун так ни разу вас и не настиг.');
+  if(S.goldEarned>0) facts.push(`💰 Через ваши руки прошло <b>${fmtNum(S.goldEarned)}</b> золотых; в казне осталось ${fmtNum(gold)}.`);
+  document.getElementById('statsView').innerHTML=`
+    <div class="cityCard">
+      <h2>${victory?'🏆 Победа! Все пять земель покорены':(gameOverPermanent?'💀 Летопись павшего героя':'📊 Летопись похода')}</h2>
+      ${victory?`<p style="font-size:13.5px;">Вы — владыка известного мира. Вот как это было:</p>`:''}
+      <div class="statSection">Путь</div>
+      <div class="statGrid">
+        ${cell(fmtNum(S.tilesWalked),'клеток пройдено пешком')}
+        ${cell(fmtNum(S.tilesSailed),'клеток под парусом')}
+        ${cell(S.voyages,'дальних плаваний')}
+        ${cell(`${lands}/5`,'земель открыто')}
+        ${cell(totalDays(),'дней в пути')}
+        ${cell(fmtTime(S.playMs),'времени за игрой')}
+      </div>
+      <div class="statSection">Работники</div>
+      <div class="statGrid">
+        ${cell(S.forestCut,'клеток леса вырублено')}
+        ${cell(S.rocksBroken,'скал разрушено')}
+        ${cell(S.bridgesBuilt,'мостов построено')}
+      </div>
+      <div class="statSection">Войны</div>
+      <div class="statGrid">
+        ${cell(S.battlesWon,'побед')}
+        ${cell(S.battlesLost,'поражений')}
+        ${cell(S.retreats,'отступлений')}
+        ${cell(fmtNum(S.enemiesSlain),'врагов сражено')}
+        ${cell(fmtNum(S.troopsLost),'своих воинов потеряно')}
+        ${cell(fmtNum(S.strongestFoe),'сила сильнейшего врага')}
+        ${cell(castles,'замков захвачено')}
+        ${cell(`${pieces}/${lands*TOTAL_PIECES}`,'частей карт собрано')}
+      </div>
+      <div class="statSection">Герой и казна</div>
+      <div class="statGrid">
+        ${cell(heroLevel,'уровень героя')}
+        ${cell(currentRank().name,'звание')}
+        ${cell(fmtNum(armyPow),'сила армии сейчас')}
+        ${cell(fmtNum(S.unitsRecruited),'воинов нанято')}
+        ${cell(S.spellsCast,'заклинаний сотворено')}
+        ${cell(S.chestsOpened,'сундуков открыто')}
+        ${cell(S.scrollsRead,'свитков прочитано')}
+        ${cell(fmtNum(S.goldEarned),'золота добыто')}
+        ${cell(fmtNum(S.goldSpent),'золота потрачено')}
+      </div>
+      <div class="funFacts">${facts.join('<br>')}</div>
+      <div style="margin-top:12px;">
+        ${gameOverPermanent?`<button class="secondary" onclick="showView('gameover')">↩️ Назад</button>`:`<button onclick="showView('map');renderMap();">↩️ К карте</button>`}
+        ${victory?`<button class="secondary" onclick="document.getElementById('restartBtn').click()">🔄 Новый мир</button>`:''}
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px;">Сохранение: ${CLOUD_OK?'облако Telegram + устройство':'на этом устройстве'}.</div>
+    </div>`;
+}
+document.getElementById('statsBtn').onclick=()=>{ if(view==='battle') return; closeModal(); openStats(false); };
+
+async function readBestSave(){
+  const local=LocalStore.load();
+  let cloud=null;
+  if(CLOUD_OK){ try{ cloud=await withTimeout(CloudStore.load(),5000); }catch(e){ cloud=null; } }
+  const ts=s=>{ try{ return JSON.parse(s).savedAt||0; }catch(e){ return -1; } };
+  return [local,cloud].filter(Boolean).sort((a,b)=>ts(b)-ts(a));
+}
+function updateSaveButtons(){
+  const sb=document.getElementById('saveBtn'), lb=document.getElementById('loadBtn');
+  if(sb) sb.style.display=hardMode?'none':'';
+  if(lb) lb.style.display=hardMode?'none':'';
+}
+document.getElementById('saveBtn').onclick=()=>{
+  if(hardMode||view==='battle') return;
+  closeModal();
+  saveSoon(true);
+  if(view!=='map'){ showView('map'); renderMap(); }
+  setInfo(`💾 Игра сохранена (день ${day}).`);
+};
+document.getElementById('loadBtn').onclick=()=>{
+  if(hardMode||view==='battle') return;
+  closeModal();
+  if(view!=='map'){ showView('map'); renderMap(); }
+  setInfo(`📂 Вернуться к последнему сохранению? Всё, что произошло после него, будет потеряно.<br>
+    <button onclick="loadLastSave()">Загрузить</button> <button class="secondary" onclick="setInfo('')">Отмена</button>`);
+};
+async function loadLastSave(){
+  setInfo('⏳ Загрузка...');
+  const cands=await readBestSave();
+  for(const c of cands){
+    if(restoreGame(c)){
+      curCity=null; curEncounter=null; currentWallBonus=0;
+      lastSavedPrint=progressPrint(); syncClosingGuard();
+      showView('map'); renderMap(); updateSaveButtons();
+      setInfo(`📂 Загружено сохранение: ${contCfg().emoji} ${contCfg().name}, день ${day}.`);
+      return;
+    }
+  }
+  setInfo('Сохранение не найдено.');
+}
+
+async function bootGame(){
+  showView('map'); layoutViewport();
+  setInfo('⏳ Загрузка сохранения...');
+  const cands=await readBestSave();
+  let restored=false;
+  for(const c of cands){ if(restoreGame(c)){ restored=true; break; } }
+  if(!restored) startNewWorld();
+  booted=true;
+  lastSavedPrint=progressPrint();
+  if(!restored) saveSoon(true); // первая точка сохранения нового мира
+  updateSaveButtons();
+  showView('map'); renderMap();
+  if(!restored) openNewGame(true);
+  if(gameOverPermanent){ triggerGameOver(gameOverReason||'Ваш герой пал в жёстком режиме.'); }
+  else setInfo(restored?`📜 Сохранение загружено: ${contCfg().emoji} ${contCfg().name}, день ${day}, неделя ${week}.`:'Новый мир сгенерирован. Игра сохраняется в начале каждого дня; можно сохраниться и вручную.');
+  if(!document.getElementById('saveBadge').textContent) setSaveBadge(CLOUD_OK?'☁️':'💾');
+}
+
+function startNewWorld(){
+  worldSeed=Date.now(); worlds=[]; curCont=0; unlocked=[true,false,false,false,false];
+  const w=loadWorld(0);
+  hero={row:w.CITY1.r,col:w.CITY1.c};
+}
+bootGame();
+</script>
+</body>
+</html>
