@@ -231,6 +231,7 @@
     <button id="saveBtn" class="secondary">💾 Сохранить игру</button>
     <button id="loadBtn" class="secondary">📂 Загрузить последнее сохранение</button>
     <button id="statsBtn" class="secondary">📊 Летопись похода</button>
+    <button id="challengeBtn" class="secondary">🏆 Испытание недели</button>
     <button id="questLogBtn" class="secondary">📜 Поручения</button>
     <button id="pathBtn" class="secondary">🧩 Карта пути</button>
     <button id="journalBtn" class="secondary">📖 Справочник городов</button>
@@ -245,7 +246,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.18.2', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.19.0', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -258,7 +259,30 @@ window.addEventListener('unhandledrejection',e=>{ recentErrors.push('promise: '+
    сервер проверяет подпись и сам вычисляет код игрока. Пусто в ANALYTICS_URL = сбор выключен.
    Игрок = анонимный идентификатор: в Telegram — хеш SHA-256 от id аккаунта (одинаков на всех устройствах,
    но имя и id не передаются), вне Telegram — случайный, хранится на устройстве. */
-const ANALYTICS_URL='https://morveyn-api.morveyn.workers.dev/events';
+const API_BASE='https://morveyn-api.morveyn.workers.dev';
+const ANALYTICS_URL=API_BASE+'/events';
+// Ссылка на мини-приложение для вызовов «Побей мой результат»: https://t.me/<бот>/<короткое_имя>. Пусто — кнопка вызова скрыта.
+const BOT_APP_URL='';
+/* ================= ВОСПРОИЗВОДИМАЯ СЛУЧАЙНОСТЬ =================
+   Вся случайность, влияющая на игру, идёт через R(). В обычной игре это Math.random. В испытании недели —
+   поток из сида недели: отдельный на каждый день и на каждый бой (клетка боя + номер попытки на ней).
+   Одинаковые решения в одинаковом бою дают одинаковый исход у всех игроков недели. */
+let challenge=null; // {week, seed, hero, goal?, attempts:{}, done}
+let rngFn=Math.random;
+function R(){ return rngFn(); }
+function hashStr(str){ let h=2166136261>>>0; for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+function setStream(key){ rngFn=challenge?mulberry32(hashStr(challenge.seed+'|'+key)):Math.random; }
+/* Неделя по ISO (понедельник–воскресенье, UTC), например «2026-W40». Та же функция — на сервере. */
+function isoWeekId(ts){
+  const d=new Date(ts), t=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()));
+  const dn=(t.getUTCDay()+6)%7; t.setUTCDate(t.getUTCDate()-dn+3);
+  const fy=t.getUTCFullYear(), ft=new Date(Date.UTC(fy,0,4));
+  const w=1+Math.round(((t-ft)/864e5-3+((ft.getUTCDay()+6)%7))/7);
+  return fy+'-W'+String(w).padStart(2,'0');
+}
+const CHAL_HEROES=['knight','sorceress','ranger'];
+function heroForWeek(id){ const y=+id.slice(0,4), w=+id.slice(6); return CHAL_HEROES[(y*53+w)%3]; }
+function challengeSeed(id){ return hashStr('morveyn-challenge|'+id); }
 const SESSION_ID=Math.random().toString(36).slice(2,10)+Date.now().toString(36);
 const SESSION_T0=Date.now();
 let analyticsQueue=[], playerId=null;
@@ -979,7 +1003,7 @@ function updateHud(){
   document.getElementById('contName').textContent=contCfg().emoji;
   document.getElementById('contName').title=contCfg().name;
   document.getElementById('contTier').textContent=contTier()+1;
-  document.getElementById('modeBadge').textContent=hardMode?'⚔️ Жёсткий режим':'🛡️ Обычный режим';
+  document.getElementById('modeBadge').textContent=challenge?`🏆 Испытание ${challenge.week}`:(hardMode?'⚔️ Жёсткий режим':'🛡️ Обычный режим');
   { const h=heroCls(); document.getElementById('heroBadge').textContent=`${h.emoji} ${h.name}, ${h.title}`; }
   document.getElementById('hlevel').textContent=heroLevel;
   document.getElementById('hexp').textContent=heroExp;
@@ -991,6 +1015,7 @@ function checkLandComplete(){
     landComplete=true;
     const next=curCont+1;
     track('land_complete',{land:curCont,days:day,playMin:Math.round(stats.playMs/60000)});
+    if(challenge){ setTimeout(finishChallenge,1500); return; }
     if(next<CONTINENTS.length){
       unlocked[next]=true;
       setTimeout(()=>setInfo(`🎉 <b>${contCfg().name} покорён!</b> На собранной карте проступил путь в земли ${CONTINENTS[next].emoji} <b>${CONTINENTS[next].name}</b>. Отплыть можно из любой пристани (нужен корабль).`),100);
@@ -1001,6 +1026,7 @@ function checkLandComplete(){
   }
 }
 function showView(v){
+  if(view==='battle'&&v!=='battle'&&challenge) setStream('d|'+day+'|'+(stats.battlesWon+stats.battlesLost+stats.retreats));
   view=v;
   setTimeout(syncBackButton,0);
   document.body.className=document.body.className.replace(/\bv-\w+/g,'').trim()+' v-'+v;
@@ -1018,6 +1044,7 @@ function showView(v){
 }
 function triggerGameOver(reason){
   if(!gameOverPermanent) track('game_over',{reason:String(reason).slice(0,120)});
+  if(challenge&&!challenge.done){ setChalStatus({week:challenge.week,state:'dead'}); track('chal_dead',{week:challenge.week,day}); }
   gameOverPermanent=true; gameOverReason=reason; saveSoon(true);
   showView('gameover');
   document.getElementById('gameOverView').innerHTML=`
@@ -1025,9 +1052,10 @@ function triggerGameOver(reason){
     <p>${reason}</p>
     <p style="color:var(--muted);font-size:12.5px;">Жёсткий режим: поражение необратимо, второго шанса не будет.</p>
     <button class="secondary" onclick="openStats(false)">📊 Летопись павшего героя</button>
+    ${challenge?`<button onclick="resumeCampaign()">↩️ Вернуться к кампании</button>`:''}
     <button class="secondary" onclick="openNewGame(false)">🔄 Начать заново</button></div>`;
 }
-function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+function randInt(a,b){ return Math.floor(R()*(b-a+1))+a; }
 
 /* ================= MAP ================= */
 function dijkstra(){
@@ -1421,7 +1449,7 @@ function chestChoice(r,c,type){
   if(type==='gold'){ gold+=base; updateHud(); setInfo(`💰 Вы забрали ${base} золота.`); }
   else if(type==='wisdom'){ bonusLeadership+=10; updateHud(); setInfo('📚 +10 к лидерству навсегда.'); }
   else if(type==='risk'){
-    if(Math.random()<0.5){ const win=base*2; gold+=win; updateHud(); setInfo(`🎲 Повезло! +${win} золота.`); }
+    if(R()<0.5){ const win=base*2; gold+=win; updateHud(); setInfo(`🎲 Повезло! +${win} золота.`); }
     else{
       const alive=army.filter(a=>a.hp>0);
       if(alive.length){ alive.sort((a,b)=>a.hp-b.hp); const weak=alive[0], loss=Math.round(weak.hp*0.3); weak.hp-=loss;
@@ -1433,8 +1461,8 @@ function chestChoice(r,c,type){
 }
 function openScroll(p){
   visited[key(p.r,p.c)+':scroll']=true; stats.scrollsRead++;
-  if(Math.random()<0.55){
-    const spell=SPELLS[Math.floor(Math.random()*SPELLS.length)];
+  if(R()<0.55){
+    const spell=SPELLS[Math.floor(R()*SPELLS.length)];
     spellCharges[spell.key]=(spellCharges[spell.key]||0)+1;
     updateHud();
     setInfo(`📃 Свиток раскрывает тайну: получено заклинание «${spell.name}» (${spell.emoji})!`);
@@ -1454,7 +1482,7 @@ function applyCursedScroll(){
   if(aliveStacks.length){ options.push(()=>{ aliveStacks.sort((a,b)=>b.hp-a.hp); const s=aliveStacks[0]; const loss=Math.round(s.hp*0.2); s.hp-=loss; return `навёл порчу на «${UNITS[s.key].name}» (-${loss} хп отряда).`; }); }
   if(Object.values(spellCharges).some(v=>v>0)){ options.push(()=>{ Object.keys(spellCharges).forEach(k=>spellCharges[k]=0); return `развеял все ваши заклинания!`; }); }
   if(canSinkShip){ options.push(()=>{ hasShip=false; shipPos=null; return `утопил ваш корабль на приколе!`; }); }
-  const pick=options[Math.floor(Math.random()*options.length)];
+  const pick=options[Math.floor(R()*options.length)];
   return pick();
 }
 function openWizard(p){
@@ -1479,7 +1507,7 @@ function randomWalkableSpot(sr,sc,minDist){
     if(pois.some(q=>q.r===r&&q.c===c)) continue;
     cand.push({r,c});
   }
-  return cand.length?cand[Math.floor(Math.random()*cand.length)]:null;
+  return cand.length?cand[Math.floor(R()*cand.length)]:null;
 }
 function openWaystone(p){
   visited[key(p.r,p.c)+':waystone']=true;
@@ -1562,7 +1590,7 @@ function sorcererCatch(){
   options.push(()=>{ const lost=Math.min(bonusLeadership,10); bonusLeadership-=lost; return `ослабляет ваш авторитет (-${lost} к лидерству)!`; });
   const alive=army.filter(a=>a.hp>0);
   if(alive.length){ options.push(()=>{ alive.sort((a,b)=>b.hp-a.hp); const s=alive[0]; const loss=Math.round(s.hp*0.3); s.hp-=loss; return `забирает часть «${UNITS[s.key].name}» (-${loss} хп)!`; }); }
-  const pick=options[Math.floor(Math.random()*options.length)];
+  const pick=options[Math.floor(R()*options.length)];
   const msg=pick();
   relocateSorcerer();
   updateHud();
@@ -1587,7 +1615,7 @@ function castAdventureSpell(k){
   spellCharges[k]--; stats.spellsCast++; updateHud();
   if(k==='givearmy'){
     const allKeys=Object.keys(UNITS);
-    const uk=allKeys[Math.floor(Math.random()*allKeys.length)];
+    const uk=allKeys[Math.floor(R()*allKeys.length)];
     const count=Math.max(2,Math.round(20/UNITS[uk].tier));
     const addHp=count*UNITS[uk].hp;
     let existing=army.find(a=>a.key===uk&&a.hp>0);
@@ -1824,6 +1852,8 @@ function bOccupied(r,c){ return isObst(r,c)||stacks.some(s=>s.hp>0&&s.row===r&&s
 function bLog(t){ logLines.push(t); if(logLines.length>60) logLines.shift(); }
 function syncArmyFromBattle(){ stacks.filter(s=>s.side==='player').forEach(s=>{ const a=army.find(x=>x.id===s.armyId); if(a) a.hp=s.hp; }); }
 function beginBattle(enc){
+  // испытание: свой поток случайности на каждый бой — клетка боя + номер попытки на ней
+  if(challenge){ const k=hero.row+','+hero.col; challenge.attempts[k]=(challenge.attempts[k]||0)+1; setStream('b|'+k+'|'+challenge.attempts[k]); }
   logLines=[]; battleOver=false; showTip('battle');
   lastBattleEnemyPower=power(enc.enemies,false);
   const mine=activeStacks(), prows=bSlotRows(mine.length);
@@ -1868,7 +1898,7 @@ function onVictory(){
   checkLevelUp();
   if(curEncounter.type==='lair'){
     const lair=curEncounter.ref;
-    const reward=Math.round((30+Math.random()*90)*goldMult()); gold+=reward; updateHud();
+    const reward=Math.round((30+R()*90)*goldMult()); gold+=reward; updateHud();
     visited[key(lair.r,lair.c)+':lair']=true;
     bLog(`Добыча: +${reward} золота.`);
     const qmsg=questOnLairCleared(lair);
@@ -1887,7 +1917,7 @@ function onVictory(){
       });
       // выдаём следующий недостающий предмет — набор гарантированно собирается за 4 пирамиды
       const missing=Object.keys(RITUAL_ITEMS).find(k=>!ritualItems[k]);
-      let goldReward=Math.round(150+Math.random()*150), findText, setMsg='';
+      let goldReward=Math.round(150+R()*150), findText, setMsg='';
       if(missing){
         ritualItems[missing]=true; setMsg=applyRitualBonuses();
         const ri=RITUAL_ITEMS[missing];
@@ -1911,14 +1941,14 @@ function onVictory(){
   } else if(curEncounter.type==='capture'){
     const city=curEncounter.ref;
     city.owner='player'; mapPieces++;
-    const reward=Math.round((20+Math.random()*40)*goldMult()); gold+=reward; updateHud();
+    const reward=Math.round((20+R()*40)*goldMult()); gold+=reward; updateHud();
     bLog(`🏴 ${city.lord} повержен(а)! «${city.name}» захвачен (${mapPieces}/${TOTAL_PIECES}).`);
     checkLandComplete();
     setTimeout(()=>{ openCity(city); renderCity(`Замок захвачен! +${reward}💰.`); setTimeout(()=>openPieces(true),250); },1300);
   } else if(curEncounter.type==='governor_war'){
     const gov=curEncounter.ref;
     gov.owner='player'; mapPieces=TOTAL_PIECES;
-    const reward=Math.round((50+Math.random()*60)*goldMult()); gold+=reward; updateHud();
+    const reward=Math.round((50+R()*60)*goldMult()); gold+=reward; updateHud();
     bLog(`👑 Хозяин Земли повержен! Последняя часть карты собрана (${mapPieces}/${TOTAL_PIECES})!`);
     checkLandComplete();
     setTimeout(()=>{ openCity(gov); renderCity(`Хозяин Земли повержен! +${reward}💰. Земля покорена полностью.`); setTimeout(()=>openPieces(true),250); },1300);
@@ -1936,7 +1966,7 @@ function onDefeat(){
 }
 function doAttack(att,def,fxDelay){
   const au=bUnit(att), du=bUnit(def), cnt=bCount(att);
-  const roll=Math.floor(Math.random()*(au.dmg[1]-au.dmg[0]+1))+au.dmg[0] + (att.side==='player'?equipBonus('dmg'):0);
+  const roll=Math.floor(R()*(au.dmg[1]-au.dmg[0]+1))+au.dmg[0] + (att.side==='player'?equipBonus('dmg'):0);
   const defVal=du.def + (def.side==='player'?equipBonus('def'):0) + (def.side==='enemy'?currentWallBonus:0);
   let dmg=Math.round(cnt*roll*(1-Math.min(0.7,defVal*0.05))); dmg=Math.max(cnt,dmg);
   const isShot=au.ranged&&dist(att,def)>1, cover=isShot&&shotCovered(att,def);
@@ -1946,7 +1976,7 @@ function doAttack(att,def,fxDelay){
   bLog(`${au.emoji} «${au.name}» бьёт: -${dmg} «${du.name}»${cover?' (укрытие −30%)':''}`);
   if(def.hp<=0){ def.hp=0; bLog(`☠️ «${du.name}» уничтожены!`); }
   else if(!au.ranged){
-    const dCnt=bCount(def), rroll=Math.floor(Math.random()*(du.dmg[1]-du.dmg[0]+1))+du.dmg[0] + (def.side==='player'?equipBonus('dmg'):0);
+    const dCnt=bCount(def), rroll=Math.floor(R()*(du.dmg[1]-du.dmg[0]+1))+du.dmg[0] + (def.side==='player'?equipBonus('dmg'):0);
     const atkDefVal=au.def + (att.side==='player'?equipBonus('def'):0);
     let rdmg=Math.round(dCnt*rroll*(1-Math.min(0.7,atkDefVal*0.05))*0.7); rdmg=Math.max(1,rdmg);
     att.hp-=rdmg;
@@ -1957,7 +1987,7 @@ function doAttack(att,def,fxDelay){
 }
 function aiAct(stack){
   if(battleOver) return;
-  if(stack.key!=='dragon' && stack.hp<stack.maxHp*0.3 && Math.random()<0.4){
+  if(stack.key!=='dragon' && stack.hp<stack.maxHp*0.3 && R()<0.4){
     stack.hp=0; stack.fled=true;
     bLog(`🏃 «${bUnit(stack).name}» в панике бежит с поля боя!`);
     renderBattle(); bEndTurn(); return;
@@ -2044,7 +2074,7 @@ function castSpell(k){
     renderBattle(); bEndTurn();
   } else if(k==='haste'){ fxSpell(cur,'💨'); bLog(`💨 Ускорение: «${bUnit(cur).name}» получает доп. ход!`); renderBattle(); }
   else if(k==='multiply'){
-    const mult=1.25+Math.random()*0.25;
+    const mult=1.25+R()*0.25;
     const before=Math.ceil(cur.hp/bUnit(cur).hp);
     cur.hp=Math.round(cur.hp*mult); cur.maxHp=Math.round(cur.maxHp*mult); fxSpell(cur,'🐣');
     const after=Math.ceil(cur.hp/bUnit(cur).hp);
@@ -2096,11 +2126,11 @@ let bfx=[], bVis={}, bAnimRunning=false, bScene=null, bTexCache={key:'',tex:null
 /* Препятствия на поле боя: 3–5 (в лесу и скалах на 2 больше), не на линиях построения и не вплотную друг к другу.
    На них нельзя встать; стрелы и магию они не задерживают. */
 function genObstacles(scene){
-  const n=3+Math.floor(Math.random()*3)+((scene.edge==='forest'||scene.edge==='rock')?2:0), out=[]; let guard=0;
+  const n=3+Math.floor(R()*3)+((scene.edge==='forest'||scene.edge==='rock')?2:0), out=[]; let guard=0;
   while(out.length<n&&guard++<300){
-    const r=Math.floor(Math.random()*BF_ROWS), c=2+Math.floor(Math.random()*(BF_COLS-4));
+    const r=Math.floor(R()*BF_ROWS), c=2+Math.floor(R()*(BF_COLS-4));
     if(out.some(o=>Math.abs(o.r-r)+Math.abs(o.c-c)<2)) continue;
-    const kind=scene.siege&&Math.random()<0.5?'block':scene.edge==='forest'?(Math.random()<0.7?'tree':'rock'):scene.edge==='rock'?(Math.random()<0.8?'rock':'bush'):(Math.random()<0.5?'rock':'bush');
+    const kind=scene.siege&&R()<0.5?'block':scene.edge==='forest'?(R()<0.7?'tree':'rock'):scene.edge==='rock'?(R()<0.8?'rock':'bush'):(R()<0.5?'rock':'bush');
     out.push({r,c,kind});
   }
   return out;
@@ -3232,6 +3262,7 @@ function openJournal(tab){
 }
 document.getElementById('journalBtn').onclick=()=>{ closeModal(); openJournal(); };
 document.getElementById('questLogBtn').onclick=()=>{ closeModal(); openQuestLog(); };
+document.getElementById('challengeBtn').onclick=()=>{ closeModal(); openChallengeHub(); };
 document.getElementById('pathBtn').onclick=()=>{ closeModal(); openPieces(false); };
 function bugReportText(){
   const tg=window.Telegram&&window.Telegram.WebApp;
@@ -3383,26 +3414,26 @@ function makeQuest(city){
   const lairs=pois.filter(p=>p.type==='lair'&&poiAt(p.r,p.c)===p&&!activeQuests().some(q=>q.type==='hunt'&&q.cont===curCont&&q.tr===p.r&&q.tc===p.c));
   const others=pois.filter(p=>p.type==='city'&&p!==city);
   const types=[]; if(lairs.length) types.push('hunt','hunt'); if(others.length) types.push('courier'); types.push('treasure');
-  const type=types[Math.floor(Math.random()*types.length)];
+  const type=types[Math.floor(R()*types.length)];
   if(type==='hunt'){
-    lairs.sort((a,b)=>chebyshev(a,city)-chebyshev(b,city)); const t=lairs[Math.floor(Math.random()*Math.min(4,lairs.length))];
+    lairs.sort((a,b)=>chebyshev(a,city)-chebyshev(b,city)); const t=lairs[Math.floor(R()*Math.min(4,lairs.length))];
     const pow=power(t.enemies,false);
     return {type,cont:curCont,city:city.name,tr:t.r,tc:t.c,target:t.name,gold:Math.round(pow*0.9+60),exp:Math.round(pow/4)+15,
       text:`Разбейте «${t.name}» — они разоряют окрестности ${city.name}.`};
   }
   if(type==='courier'){
-    const d=others[Math.floor(Math.random()*others.length)], far=chebyshev(d,city);
+    const d=others[Math.floor(R()*others.length)], far=chebyshev(d,city);
     return {type,cont:curCont,city:city.name,dest:d.name,gold:Math.round((40+far*3)*goldMult()),exp:20,
       text:`Доставьте письмо градоначальнику в город ${d.name}.`};
   }
   // клад: проходимая пустая клетка в 10–25 клетках от города
   let spot=null;
-  for(let i=0;i<300&&!spot;i++){ const r=city.r+Math.round((Math.random()-0.5)*50), c=city.c+Math.round((Math.random()-0.5)*50);
+  for(let i=0;i<300&&!spot;i++){ const r=city.r+Math.round((R()-0.5)*50), c=city.c+Math.round((R()-0.5)*50);
     if(r<2||c<2||r>=ROWS-2||c>=COLS-2) continue; const d=chebyshev({r,c},city); if(d<10||d>25) continue;
     if(['g','d','s','r'].includes(terrainGrid[r][c])&&!pois.some(q=>q.r===r&&q.c===c)) spot={r,c}; }
   if(!spot) return null;
   pois.push({r:spot.r,c:spot.c,type:'qspot',name:'Тайник',emoji:'❓',questCity:city.name,hidden:true});
-  return {type:'treasure',cont:curCont,city:city.name,tr:spot.r,tc:spot.c,gold:Math.round((120+Math.random()*120)*goldMult()),exp:25,item:Math.random()<0.3,
+  return {type:'treasure',cont:curCont,city:city.name,tr:spot.r,tc:spot.c,gold:Math.round((120+R()*120)*goldMult()),exp:25,item:R()<0.3,
     text:`По старой карте горожан где-то неподалёку зарыт клад. Отыщите тайник ❓.`};
 }
 function cityQuestHtml(p){
@@ -3431,7 +3462,7 @@ function completeQuest(q,where){
   gold+=q.gold; heroExp+=q.exp; let extra='';
   if(q.item){ const lo=Math.max(1,contTier()), hi=Math.min(5,contTier()+1);
     const pool=Object.keys(ITEMS).filter(id=>ITEMS[id].tier>=lo&&ITEMS[id].tier<=hi&&!inventory.includes(id)&&!Object.values(equipment).includes(id));
-    if(pool.length){ const id=pool[Math.floor(Math.random()*pool.length)]; inventory.push(id); extra=` и ${ITEMS[id].emoji} ${ITEMS[id].name}`; } }
+    if(pool.length){ const id=pool[Math.floor(R()*pool.length)]; inventory.push(id); extra=` и ${ITEMS[id].emoji} ${ITEMS[id].name}`; } }
   checkLevelUp(); updateHud(); stats.questsDone=(stats.questsDone||0)+1; track('quest_done',{type:q.type});
   return `📜 Поручение города ${q.city} выполнено${where?' — '+where:''}! +${q.gold}💰, +${q.exp} опыта${extra}.`;
 }
@@ -3498,6 +3529,179 @@ function openPieces(justGot){
   document.getElementById('pieceSlot').appendChild(cv);
 }
 
+/* ================= ИСПЫТАНИЕ НЕДЕЛИ: ИНТЕРФЕЙС =================
+   Статус попытки недели хранится на устройстве (started / done / dead), прогресс — в своей ячейке сохранения.
+   Финиш = собраны все 8 частей карты Морвейна. Результат уходит на сервер (только из Telegram, с подписью). */
+const CHAL_STATUS_KEY='morveyn_chal_status';
+let chalInvite=null, firstRunPending=false, boardCache=null, boardTab='days';
+function chalStatus(){ try{ return JSON.parse(localStorage.getItem(CHAL_STATUS_KEY)||'null'); }catch(e){ return null; } }
+function setChalStatus(st){ try{ localStorage.setItem(CHAL_STATUS_KEY,JSON.stringify(st)); }catch(e){} }
+function escHtml(x){ return String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function weekRange(id){
+  const y=+id.slice(0,4), w=+id.slice(6), jan4=new Date(Date.UTC(y,0,4)), mon=new Date(jan4);
+  mon.setUTCDate(jan4.getUTCDate()-((jan4.getUTCDay()+6)%7)+(w-1)*7); const sun=new Date(mon); sun.setUTCDate(mon.getUTCDate()+6);
+  const f=d=>d.toLocaleDateString('ru-RU',{day:'numeric',month:'short',timeZone:'UTC'}); return f(mon)+' – '+f(sun);
+}
+function fmtMs(ms){ const m=Math.max(1,Math.round(ms/60000)), h=Math.floor(m/60); return h?`${h} ч ${m%60} мин`:`${m} мин`; }
+function tgInitData(){ const tg=window.Telegram&&window.Telegram.WebApp; return tg&&tg.initData?tg.initData:''; }
+async function apiPost(path,body){
+  const r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)});
+  let j=null; try{ j=await r.json(); }catch(e){} return {status:r.status,data:j};
+}
+function openChallengeHub(){
+  const wk=isoWeekId(Date.now()), hk=heroForWeek(wk), h=HERO_CLASSES[hk], st=chalStatus(), mine=st&&st.week===wk?st:null;
+  let status='', buttons='';
+  if(challenge&&challenge.week===wk&&!challenge.done&&!gameOverPermanent){
+    status=`Вы сейчас в испытании: день ${day}, частей карты ${mapPieces}/${TOTAL_PIECES}.`;
+    buttons=`<button class="modeBtn secondary" onclick="resumeCampaign()">↩️ Вернуться к кампании<small>Испытание сохранится — продолжите из меню.</small></button>`;
+  } else if(mine&&mine.state==='done'){
+    status=`✅ Пройдено: Морвейн покорён за <b>${mine.days}</b> дн., ${fmtMs(mine.activeMs)}.${mine.rankDays?` Место по дням — <b>#${mine.rankDays}</b>.`:''}`;
+    buttons=`<button class="modeBtn" onclick="openChallengeResult()">🏅 Мой результат и вызов друзьям</button>`;
+  } else if(mine&&mine.state==='dead'){
+    status='💀 Попытка этой недели окончена — герой пал. Новое испытание — в понедельник.';
+  } else if(mine&&mine.state==='started'){
+    status='Испытание начато и не закончено.';
+    buttons=`<button class="modeBtn" onclick="continueChallenge()">▶️ Продолжить испытание</button>`;
+  } else {
+    buttons=`<button class="modeBtn" onclick="startChallenge()">⚔️ Начать испытание<small>Одна попытка в неделю. Кампания сохранится — к ней можно вернуться в любой момент.</small></button>`;
+  }
+  const goal=chalInvite&&chalInvite.week===wk?`<div class="modalNote" style="color:var(--accent);margin-top:8px;">🎯 Вас вызвали: покорите Морвейн быстрее, чем за ${chalInvite.days} дн. (${chalInvite.min} мин активной игры).</div>`:'';
+  openModal(`<h2>🏆 Испытание недели</h2>
+    <div class="modalNote">${wk} · ${weekRange(wk)}</div>
+    <div style="display:flex;gap:10px;align-items:center;margin:8px 0;"><img alt="" src="${spriteURL('unitTok',56,'hero_'+hk+'|#4d84c4')}" style="width:48px;height:62px;">
+      <div class="modalNote" style="color:var(--text)">Герой недели — <b>${h.name}, ${h.title}</b>.<br>Цель — покорить Морвейн: собрать все 8 частей карты.</div></div>
+    <div class="modalNote">Одна карта для всех, жёсткий режим: без загрузок, гибель окончательна. Удача в боях у всех одинаковая — решает тактика. Две таблицы: по игровым дням и по активному времени.</div>
+    ${goal}${status?`<div class="modalNote" style="color:var(--text);margin-top:8px;">${status}</div>`:''}${buttons}
+    <button class="secondary" style="margin-top:10px;width:100%;" onclick="openLeaderboard('days')">📊 Таблица рекордов</button>
+    <button class="secondary" style="margin-top:8px;width:100%;" onclick="chalHubClose()">Закрыть</button>`);
+}
+function chalHubClose(){ closeModal(); if(firstRunPending) openNewGame(true); }
+function startChallenge(){
+  const wk=isoWeekId(Date.now()), st=chalStatus();
+  if(st&&st.week===wk&&st.state==='started'){ continueChallenge(); return; }
+  if(st&&st.week===wk){ openChallengeHub(); return; }
+  const fresh=firstRunPending; firstRunPending=false;
+  closeModal();
+  if(booted&&!challenge&&!fresh&&!gameOverPermanent) writeSave('auto'); // кампания сохранена как есть
+  pendingHero=heroForWeek(wk);
+  setChalStatus({week:wk,state:'started'});
+  doRestart(true,{challenge:{week:wk,seed:challengeSeed(wk),hero:pendingHero,attempts:{},done:false,goal:chalInvite&&chalInvite.week===wk?chalInvite:null}});
+  track('chal_start',{week:wk,invited:!!(chalInvite&&chalInvite.week===wk)});
+  setInfo(`🏆 Испытание недели ${wk} началось! ${HERO_CLASSES[pendingHero].name} должен покорить Морвейн как можно быстрее.`);
+}
+function afterLoad(msg){
+  curCity=null; curEncounter=null; currentWallBonus=0;
+  lastSavedPrint=progressPrint(); syncClosingGuard(); showView('map'); renderMap(); updateSaveButtons();
+  if(gameOverPermanent) triggerGameOver(gameOverReason||'Ваш герой пал в жёстком режиме.'); else setInfo(msg);
+}
+async function continueChallenge(){
+  closeModal(); firstRunPending=false;
+  const str=await readSlot('challenge');
+  if(!str){ setInfo('Сохранение испытания не найдено.'); return; }
+  if(!challenge&&!gameOverPermanent) writeSave('auto');
+  if(restoreGame(str)) afterLoad(`🏆 Испытание ${challenge?challenge.week:''}: день ${day}.`);
+}
+async function resumeCampaign(){
+  closeModal();
+  if(challenge&&!gameOverPermanent&&!challenge.done) writeSave('challenge');
+  const str=await readCampaignSave();
+  challenge=null; setStream('d|0');
+  if(str&&restoreGame(str)){ afterLoad(`↩️ Кампания: ${contCfg().emoji} ${contCfg().name}, день ${day}.`); return; }
+  // кампании ещё не было — начинаем новую с выбором героя
+  gameOverPermanent=false; doRestart(false); openNewGame(false);
+}
+async function finishChallenge(){
+  if(!challenge||challenge.done) return;
+  tickPlaytime(); challenge.done=true;
+  const res={week:challenge.week,state:'done',days:day,activeMs:Math.round(stats.playMs)};
+  setChalStatus(res); writeSave('challenge');
+  track('chal_finish',{week:res.week,days:res.days,min:Math.round(res.activeMs/60000)});
+  openChallengeResult();
+  await submitScore();
+  if(modalOpen()) openChallengeResult();
+}
+async function submitScore(){
+  const st=chalStatus(); if(!st||st.state!=='done'||st.submitted) return;
+  if(!tgInitData()){ st.note='Таблица рекордов работает в Telegram — результат сохранён только на этом устройстве.'; setChalStatus(st); return; }
+  try{
+    const r=await apiPost('/scores',{week:st.week,days:st.days,active_ms:st.activeMs,hero:heroForWeek(st.week),v:GAME_VERSION,initData:tgInitData()});
+    if(r.status===200&&r.data){ Object.assign(st,{submitted:true,pending:false,note:'',rankDays:r.data.rank_days,rankTime:r.data.rank_time,total:r.data.total}); }
+    else if(r.status===409){ Object.assign(st,{submitted:true,pending:false,note:'Результат этой недели уже был отправлен.'}); }
+    else Object.assign(st,{pending:false,note:'Сервер не принял результат ('+((r.data&&r.data.error)||r.status)+').'});
+  }catch(e){ Object.assign(st,{pending:true,note:'Нет связи с сервером — результат отправится при следующем запуске.'}); }
+  setChalStatus(st);
+}
+function resultCardURL(st){
+  const W=640,H=360, cv=document.createElement('canvas'); cv.width=W; cv.height=H; const g=cv.getContext('2d');
+  const gr=g.createLinearGradient(0,0,0,H); gr.addColorStop(0,'#3a2b1d'); gr.addColorStop(1,'#1e160e'); g.fillStyle=gr; g.fillRect(0,0,W,H);
+  g.strokeStyle='#b8902f'; g.lineWidth=4; g.strokeRect(8,8,W-16,H-16); g.strokeStyle='rgba(233,196,106,0.35)'; g.lineWidth=1; g.strokeRect(16,16,W-32,H-32);
+  const w0=worlds[0];
+  if(w0){ const sc=2.4, mx=W-COLS*sc-34, my=110, P=PALETTES[0];
+    const col={g:P.grass[0],d:P.sand[0],s:P.swamp[0],w:P.water[0],f:P.tree[1],m:P.peak[1],r:P.road[0]};
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ g.fillStyle=col[w0.terrainGrid[r][c]]||P.grass[0]; g.fillRect(mx+c*sc,my+r*sc,sc+0.5,sc+0.5); }
+    (w0.pois||[]).forEach(p=>{ if(p.type==='castle'||p.type==='governor'){ g.fillStyle='#4da3ff'; g.fillRect(mx+p.c*sc-3,my+p.r*sc-3,6,6); } });
+    g.strokeStyle='#b8902f'; g.lineWidth=2; g.strokeRect(mx,my,COLS*sc,ROWS*sc); }
+  const hk=heroForWeek(st.week);
+  g.fillStyle='rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(120,312,70,16,0,0,Math.PI*2); g.fill();
+  g.drawImage(sprite('fig',160,1,'hero_'+hk+'|0'),30,312-160*(0.78+SPR_H-1),160,160*SPR_H);
+  g.fillStyle='#e9c46a'; g.font='bold 24px Georgia,serif'; g.fillText('Испытание недели · '+st.week,34,56);
+  g.fillStyle='#f1e6cf'; g.font='16px Georgia,serif'; g.fillText(HERO_CLASSES[hk].name+': Морвейн покорён',205,128);
+  g.fillStyle='#e9c46a'; g.font='bold 44px Georgia,serif'; g.fillText(st.days+' дн.',205,182);
+  g.fillStyle='#f1e6cf'; g.font='18px Georgia,serif'; g.fillText('время: '+fmtMs(st.activeMs),205,218);
+  if(st.rankDays){ g.fillStyle='#e9c46a'; g.font='bold 18px Georgia,serif'; g.fillText(`место #${st.rankDays} из ${st.total}`,205,254); }
+  g.fillStyle='rgba(241,230,207,0.6)'; g.font='14px Georgia,serif'; g.fillText('Морвейн — стратегия в Telegram',205,318);
+  return cv.toDataURL('image/png');
+}
+function openChallengeResult(){
+  const st=chalStatus(); if(!st||st.state!=='done'){ openChallengeHub(); return; }
+  const h=HERO_CLASSES[heroForWeek(st.week)];
+  openModal(`<h2>🏅 Морвейн покорён!</h2>
+    <img alt="Карточка результата" src="${resultCardURL(st)}" style="width:100%;border-radius:8px;margin-top:4px;">
+    <div class="modalNote" style="color:var(--text);margin-top:8px;">${h.name}: <b>${st.days}</b> дн., ${fmtMs(st.activeMs)} активной игры.${st.rankDays?` Место: <b>#${st.rankDays}</b> по дням, <b>#${st.rankTime}</b> по времени из ${st.total}.`:''}</div>
+    ${st.note?`<div class="modalNote" style="margin-top:4px;">${escHtml(st.note)}</div>`:''}
+    ${BOT_APP_URL?`<button style="width:100%;margin-top:10px;" onclick="shareChallenge()">⚔️ Бросить вызов друзьям</button>`:''}
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="openLeaderboard('days')">📊 Таблица рекордов</button>
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="resumeCampaign()">↩️ Вернуться к кампании</button>
+    <div class="modalNote" style="font-size:11.5px;margin-top:6px;">Картинку можно сохранить долгим нажатием.</div>`);
+}
+function shareChallenge(){
+  const st=chalStatus(); if(!st||!BOT_APP_URL) return;
+  const param=`chal_${st.week.replace('-','')}_${st.days}_${Math.max(1,Math.round(st.activeMs/60000))}`;
+  const link=`${BOT_APP_URL}?startapp=${param}`;
+  const text=`🏆 Испытание недели в «Морвейне»: Морвейн покорён за ${st.days} дн. (${fmtMs(st.activeMs)}). Сможешь быстрее?`;
+  const url=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+  const tg=window.Telegram&&window.Telegram.WebApp;
+  if(tg&&tg.initData&&tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url,'_blank');
+  track('chal_share',{week:st.week});
+}
+async function openLeaderboard(tab){
+  if(tab) boardTab=tab;
+  const wk=isoWeekId(Date.now());
+  openModal(`<h2>📊 Рекорды ${wk}</h2><div class="modalNote">⏳ Загрузка…</div>`);
+  try{ const r=await apiPost('/leaderboard',{week:wk,initData:tgInitData()||undefined}); boardCache=r.status===200?r.data:null; }catch(e){ boardCache=null; }
+  renderBoard(wk);
+}
+function renderBoard(wk){
+  const b=boardCache;
+  if(!b){ openModal(`<h2>📊 Рекорды ${wk}</h2><div class="modalNote">Не удалось загрузить таблицу — проверьте связь.</div><button class="secondary" style="width:100%;margin-top:10px;" onclick="openChallengeHub()">Назад</button>`); return; }
+  const rows=boardTab==='days'?b.top_days:b.top_time;
+  const list=rows.length?rows.map((x,i)=>`<div class="row" style="${x.me?'background:rgba(233,196,106,0.14);border-radius:6px;padding-left:6px;':''}"><span><b>#${i+1}</b> ${escHtml(x.name||'Игрок')} ${(HERO_CLASSES[x.hero]||{}).emoji||''}</span><span>${boardTab==='days'?`<b>${x.days} дн.</b> · ${fmtMs(x.active_ms)}`:`<b>${fmtMs(x.active_ms)}</b> · ${x.days} дн.`}</span></div>`).join('')
+    :'<div class="armyline">Пока никто не прошёл испытание этой недели. Станьте первым!</div>';
+  const me=b.me?`<div class="modalNote" style="color:var(--accent);margin-top:8px;">Вы: #${b.me.rank_days} по дням, #${b.me.rank_time} по времени (${b.me.days} дн., ${fmtMs(b.me.active_ms)}).</div>`
+    :(tgInitData()?'':'<div class="modalNote" style="margin-top:8px;">Отправлять результаты можно только из Telegram.</div>');
+  openModal(`<h2>📊 Рекорды ${wk}</h2><div class="modalNote">Участников: ${b.total}</div>
+    <div style="display:flex;gap:6px;margin:8px 0;"><button class="${boardTab==='days'?'':'secondary'}" onclick="boardTab='days';renderBoard('${wk}')">По дням</button>
+      <button class="${boardTab==='time'?'':'secondary'}" onclick="boardTab='time';renderBoard('${wk}')">По времени</button></div>
+    ${list}${me}
+    <button class="secondary" style="width:100%;margin-top:10px;" onclick="openChallengeHub()">Назад к испытанию</button>`);
+}
+/* Ссылка-вызов: ?startapp=chal_2026W40_23_41 → неделя, дни, минуты соперника */
+function parseInvite(){
+  const m=startSource().match(/^chal_(\d{4})W(\d{2})_(\d{1,4})_(\d{1,5})$/);
+  chalInvite=m?{week:`${m[1]}-W${m[2]}`,days:+m[3],min:+m[4]}:null;
+  return chalInvite;
+}
+
 const GAME_INTRO=`Пять земель по 80×60 клеток, каждая опаснее предыдущей. В каждой — 5 городов и 8 замков: покорите землю целиком, чтобы открыть путь к следующей. Между землями плавают из любой пристани — корабль плывёт с вами.`;
 let pendingHero='knight';
 function openNewGame(first){
@@ -3508,6 +3712,7 @@ function openNewGame(first){
     ${first?'':`<div class="modalNote" style="color:var(--bad);margin-top:8px;">Текущая партия и её сохранение будут стёрты.</div>`}
     <div class="modalNote" style="margin-top:10px;color:var(--text);"><b>Выберите героя:</b></div>
     ${cards}
+    <button class="modeBtn" style="margin-top:12px;" onclick="openChallengeHub()">🏆 Или — испытание недели<small>Одна карта для всех, жёсткий режим, таблица рекордов.</small></button>
     ${first?'':`<button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Отмена</button>`}`, first);
 }
 function chooseHero(k,first){ pendingHero=k; openModeStep(first); }
@@ -3520,7 +3725,7 @@ function openModeStep(first){
     <button class="secondary" style="margin-top:10px;width:100%;" onclick="openNewGame(${first})">← Другой герой</button>`, first);
 }
 function beginGame(hard,first){
-  closeModal();
+  closeModal(); firstRunPending=false;
   if(first){
     // мир уже сгенерирован при запуске — фиксируем режим и героя
     hardMode=hard; applyHeroClass(pendingHero); updateSaveButtons(); renderMap(); saveSoon(true);
@@ -3533,7 +3738,7 @@ document.getElementById('invBtn').onclick=openInventory;
 document.getElementById('armyBtn').onclick=openArmyView;
 document.getElementById('magicBtn').onclick=openAdventureMagic;
 document.getElementById('nextDayBtn').onclick=()=>{
-  day++; movesLeft=MOVE_BUDGET+equipBonus('movesPerDay');
+  day++; movesLeft=MOVE_BUDGET+equipBonus('movesPerDay'); setStream('d|'+day);
   let msg=`📅 День ${day}. Ходы восстановлены.`;
   track('day',{gold,army:leadershipUsed()});
   if(day===3) setTimeout(()=>showTip('minimap'),300);
@@ -3550,7 +3755,8 @@ document.getElementById('nextDayBtn').onclick=()=>{
   saveSoon(true);
 };
 document.getElementById('restartBtn').onclick=()=>{ if(view==='battle') return; closeModal(); openNewGame(false); };
-function doRestart(hard){
+function doRestart(hard,opts){
+  opts=opts||{};
   hardMode=!!hard;
   gold=150; day=1; week=1; movesLeft=MOVE_BUDGET; visited={};
   mapPieces=0; questState='available'; landComplete=false; hasShip=false; bonusLeadership=0;
@@ -3563,7 +3769,8 @@ function doRestart(hard){
   governorWage=0; heroMagicPower=5; quasiExpireWeek=0; quasiBonus=0;
   spellCharges={heal:0,fireball:0,haste:0,multiply:0,resurrect:0,infection:0,towngate:0,givearmy:0,quasi:0,tornado:0};
   stats=freshStats(); gameOverReason='';
-  clearManualSave();
+  if(!opts.challenge) clearManualSave();
+  challenge=opts.challenge||null; setStream('d|1');
   applyHeroClass(pendingHero); lastGoldSeen=gold;
   startNewWorld();
   showView('map'); setInfo('Новый мир сгенерирован.'); renderMap();
@@ -3609,7 +3816,7 @@ function serializeGame(){
     hero, gold, day, week, movesLeft, hasShip, onShip, shipPos, lastWaterPos, bonusLeadership,
     heroLevel, heroExp, heroMagicPower, quasiExpireWeek, quasiBonus,
     equipment, inventory, army, spellCharges, workers, hardMode, gameOverPermanent, gameOverReason,
-    ritualItems, ritualGranted, ritualSetDone, governorWage, stats, heroClass
+    ritualItems, ritualGranted, ritualSetDone, governorWage, stats, heroClass, challenge
   });
 }
 function restoreGame(json){
@@ -3630,6 +3837,7 @@ function restoreGame(json){
     quasiExpireWeek,quasiBonus,equipment,inventory,army,spellCharges,workers,hardMode,gameOverPermanent,ritualItems,governorWage}=d);
   gameOverReason=d.gameOverReason||'';
   heroClass=HERO_CLASSES[d.heroClass]?d.heroClass:'classic';
+  challenge=d.challenge||null; setStream('d|'+(d.day||1)+'|load');
   // старые сохранения не знали о бонусах ритуальных предметов — выдаём положенное за уже найденные
   ritualGranted=typeof d.ritualGranted==='number'?d.ritualGranted:0; ritualSetDone=!!d.ritualSetDone;
   applyRitualBonuses();
@@ -3641,8 +3849,8 @@ function restoreGame(json){
 /* Две ячейки: 'auto' (утро, плавание, новая игра; в жёстком режиме — всё подряд) и 'manual' (кнопка «Сохранить»).
    Снимок состояния делается В МОМЕНТ сохранения и уже готовой строкой уходит и на устройство, и в облако —
    медленная запись в облако Telegram больше не может подменить его более поздним состоянием. */
-const SLOT_LOCAL={auto:SAVE_KEY, manual:SAVE_KEY+'_manual'};
-const SLOT_CLOUD={auto:CLOUD_PREFIX, manual:CLOUD_PREFIX+'m'};
+const SLOT_LOCAL={auto:SAVE_KEY, manual:SAVE_KEY+'_manual', challenge:SAVE_KEY+'_chal'};
+const SLOT_CLOUD={auto:CLOUD_PREFIX, manual:CLOUD_PREFIX+'m', challenge:CLOUD_PREFIX+'c'};
 const LocalStore={
   save(slot,str){ try{ localStorage.setItem(SLOT_LOCAL[slot],str); return true; }catch(e){ return false; } },
   load(slot){ try{ return localStorage.getItem(SLOT_LOCAL[slot]); }catch(e){ return null; } },
@@ -3676,7 +3884,7 @@ function makeCloudStore(prefix){ return {
     return str.length===m.len?str:null;
   }
 }; }
-const CloudSlots={auto:makeCloudStore(SLOT_CLOUD.auto), manual:makeCloudStore(SLOT_CLOUD.manual)};
+const CloudSlots={auto:makeCloudStore(SLOT_CLOUD.auto), manual:makeCloudStore(SLOT_CLOUD.manual), challenge:makeCloudStore(SLOT_CLOUD.challenge)};
 function withTimeout(promise,ms){ return Promise.race([promise,new Promise(res=>setTimeout(()=>res(null),ms))]); }
 
 let localTimer=null, booted=false;
@@ -3685,6 +3893,7 @@ let lastSaveLabel='';
 /* Единственная точка записи: снимок → устройство → облако (та же строка). */
 function writeSave(slot){
   if(!booted||view==='battle') return false;
+  if(challenge) slot='challenge'; // испытание пишет только в свою ячейку — кампания не затрагивается
   const str=serializeGame();
   LocalStore.save(slot,str);
   lastSavedPrint=progressPrint(); syncClosingGuard();
@@ -3804,8 +4013,12 @@ async function readSlot(slot){
 async function readAllSlots(){ const [auto,manual]=await Promise.all([readSlot('auto'),readSlot('manual')]); return {auto,manual}; }
 async function readBestSave(){
   const {auto,manual}=await readAllSlots();
-  return [auto,manual].filter(Boolean).sort((a,b)=>saveInfo(b).savedAt-saveInfo(a).savedAt);
+  const chal=await readSlot('challenge');
+  // незавершённое испытание текущей недели тоже может быть «последним», чем играли
+  const chalOk=chal&&(()=>{ try{ const d=JSON.parse(chal); return d.challenge&&d.challenge.week===isoWeekId(Date.now())&&!d.challenge.done&&!d.gameOverPermanent; }catch(e){ return false; } })();
+  return [auto,manual,chalOk?chal:null].filter(Boolean).sort((a,b)=>saveInfo(b).savedAt-saveInfo(a).savedAt);
 }
+async function readCampaignSave(){ const {auto,manual}=await readAllSlots(); return [auto,manual].filter(Boolean).sort((a,b)=>saveInfo(b).savedAt-saveInfo(a).savedAt)[0]||null; }
 function clearManualSave(){ LocalStore.clear('manual'); if(CLOUD_OK) CloudSlots.manual.clear(); }
 function updateSaveButtons(){
   const sb=document.getElementById('saveBtn'), lb=document.getElementById('loadBtn');
@@ -3869,14 +4082,17 @@ async function bootGame(){
   if(!restored) saveSoon(true); // первая точка сохранения нового мира
   updateSaveButtons();
   showView('map'); renderMap();
-  if(!restored) openNewGame(true);
+  if(!restored){ firstRunPending=true; openNewGame(true); }
+  // ссылка-вызов: открыть испытание; неотправленный результат — отправить
+  if(parseInvite()&&chalInvite.week===isoWeekId(Date.now())&&!gameOverPermanent) setTimeout(openChallengeHub,700);
+  { const st=chalStatus(); if(st&&st.state==='done'&&st.pending) submitScore(); }
   if(gameOverPermanent){ triggerGameOver(gameOverReason||'Ваш герой пал в жёстком режиме.'); }
   else setInfo(restored?`📜 Сохранение загружено: ${contCfg().emoji} ${contCfg().name}, день ${day}, неделя ${week}.`:'Новый мир сгенерирован. Игра сохраняется в начале каждого дня; можно сохраниться и вручную.');
   if(!document.getElementById('saveBadge').textContent) setSaveBadge(CLOUD_OK?'☁️':'💾');
 }
 
 function startNewWorld(){
-  worldSeed=Date.now(); worlds=[]; curCont=0; unlocked=[true,false,false,false,false];
+  worldSeed=challenge?challenge.seed:Date.now(); worlds=[]; curCont=0; unlocked=[true,false,false,false,false];
   const w=loadWorld(0);
   hero={row:w.CITY1.r,col:w.CITY1.c};
 }
