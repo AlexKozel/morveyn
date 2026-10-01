@@ -245,7 +245,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.18.1', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.18.2', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -302,7 +302,24 @@ async function flushAnalytics(useBeacon){
   if(analyticsQueue.length>300) analyticsQueue.splice(0,analyticsQueue.length-300); // не копим бесконечно без сети
 }
 setInterval(()=>flushAnalytics(false),120000);
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'){ track('session_pause',{sec:Math.round((Date.now()-SESSION_T0)/1000)}); flushAnalytics(true); } });
+/* Активное время сессии: считается только пока игра открыта и видна. В session_pause уходит накопленное
+   за всю сессию (active_sec) и время с начала сессии вместе со свёрнутыми паузами (sec). */
+let sessActiveMs=0, sessVisibleSince=document.visibilityState==='hidden'?null:Date.now();
+function sessionActiveSec(){ return Math.round((sessActiveMs+(sessVisibleSince?Date.now()-sessVisibleSince:0))/1000); }
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden'){
+    if(sessVisibleSince){ sessActiveMs+=Date.now()-sessVisibleSince; sessVisibleSince=null; }
+    track('session_pause',{sec:Math.round((Date.now()-SESSION_T0)/1000),active_sec:Math.round(sessActiveMs/1000)}); flushAnalytics(true);
+  } else if(!sessVisibleSince) sessVisibleSince=Date.now();
+});
+/* Источник прихода: метка из ссылки t.me/<бот>/<приложение>?startapp=МЕТКА (Telegram передаёт её как start_param),
+   вне Telegram — параметр ?startapp= или ?src= в адресе страницы. Только латиница, цифры, _ и -, до 64 символов. */
+function startSource(){
+  let v='';
+  try{ const tg=window.Telegram&&window.Telegram.WebApp; v=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||''; }catch(e){}
+  if(!v){ try{ const q=new URLSearchParams(location.search); v=q.get('tgWebAppStartParam')||q.get('startapp')||q.get('src')||''; }catch(e){} }
+  return String(v).replace(/[^A-Za-z0-9_-]/g,'').slice(0,64);
+}
 window.addEventListener('error',e=>track('error',{msg:String(e.message).slice(0,200),line:e.lineno}));
 /* ================= UNITS (32, 5 factions) ================= */
 const UNITS={
@@ -3840,7 +3857,7 @@ function loadSlot(slot){
 }
 
 async function bootGame(){
-  track('session_start',{screen:`${innerWidth}x${innerHeight}`,lang:navigator.language,returning:!!localStorage.getItem(SAVE_KEY)});
+  track('session_start',{screen:`${innerWidth}x${innerHeight}`,lang:navigator.language,returning:!!localStorage.getItem(SAVE_KEY),src:startSource()});
   showView('map'); layoutViewport();
   setInfo('⏳ Загрузка сохранения...');
   const cands=await readBestSave();
