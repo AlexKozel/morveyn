@@ -33,7 +33,8 @@
   #hudMain{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
   #hudMain .grow{flex:1;}
   #hudMain > span{white-space:nowrap;}
-  #hudMain .iconBtn{padding:4px 10px; font-size:15px; line-height:1;}
+  #hudMain .iconBtn{padding:4px 9px; font-size:15px; line-height:1;}
+  @media (max-width:440px){ #hudMain{gap:8px; font-size:12.5px;} #hudMain .iconBtn{padding:4px 7px; font-size:14px;} #hud{padding-left:9px; padding-right:6px;} }
   #hudMore{display:flex; flex-wrap:wrap; gap:6px 14px; font-size:12px; color:var(--muted); border-top:1px dashed rgba(212,167,44,.3);
     margin-top:6px; padding-top:6px;}
   #hudMore .stat{color:var(--text);}
@@ -49,6 +50,16 @@
   .modeBtn{display:block; width:100%; text-align:left; padding:12px; margin-top:8px;}
   .modeBtn small{display:block; font-weight:normal; font-size:12px; margin-top:3px; opacity:.85;}
   .modalNote{font-size:13px; color:var(--muted); line-height:1.5;}
+  #tipBox{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(84px + env(safe-area-inset-bottom,0px)); z-index:40;
+    width:calc(100% - 24px); max-width:520px; background:var(--panel); border:1px solid var(--accent); border-radius:12px;
+    box-shadow:0 6px 24px rgba(0,0,0,.45); padding:10px 12px; font-size:13.5px; line-height:1.45; display:flex; gap:10px; align-items:flex-start;}
+  #tipBox .tipIcon{font-size:20px; line-height:1;}
+  #tipBox .tipBody{flex:1;}
+  #tipBox button{margin-top:8px; padding:5px 12px; font-size:12.5px;}
+  body.land #tipBox{left:auto; right:calc(12px + env(safe-area-inset-right,0px)); transform:none; bottom:calc(12px + env(safe-area-inset-bottom,0px)); width:var(--side,260px);}
+  #miniCanvas{width:100%; height:auto; border-radius:8px; border:1px solid var(--accent); image-rendering:pixelated; display:block; margin-top:8px;}
+  .miniLegend{display:flex; flex-wrap:wrap; gap:6px 12px; font-size:12px; color:var(--muted); margin-top:8px;}
+  .miniLegend i{display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:4px; vertical-align:-1px; border:1px solid rgba(0,0,0,.5);}
   button{background:var(--accent); color:#1b140d; border:none; border-radius:6px; padding:7px 12px; font-size:13px;
     font-weight:bold; cursor:pointer; font-family:inherit;}
   button.secondary{background:var(--panel2); color:var(--text); border:1px solid var(--accent);}
@@ -138,6 +149,7 @@
     <span title="Лидерство: занято/всего">👥 <span class="stat" id="leadership">0/60</span></span>
     <span title="День">📅 <span class="stat" id="day">1</span></span>
     <span class="grow"></span>
+    <button id="miniBtn" class="secondary iconBtn" title="Карта земли">🧭</button>
     <button id="hudMoreBtn" class="secondary iconBtn" title="Подробнее">▾</button>
     <button id="menuBtn" class="secondary iconBtn" title="Меню">☰</button>
   </div>
@@ -148,6 +160,7 @@
     <span>🔮 Маг. сила <span class="stat" id="magicpower">5</span></span>
     <span>🗺️ Карта <span class="stat" id="pieces">0/8</span></span>
     <span>📆 Неделя <span class="stat" id="week">1</span></span>
+    <span id="heroBadge"></span>
     <span id="modeBadge"></span>
     <span id="saveBadge"></span>
   </div>
@@ -190,6 +203,7 @@
 </div><!-- /#app -->
 
 <div id="modal" class="hidden"><div id="modalCard"></div></div>
+<div id="tipBox" class="hidden"><span class="tipIcon">💡</span><div class="tipBody"><div id="tipText"></div><button id="tipOk">Понятно</button></div></div>
 <!-- кнопки меню живут здесь и переносятся в модальное окно, чтобы их обработчики не терялись -->
 <div id="menuButtons" class="hidden">
   <div class="menuList" id="menuList">
@@ -199,6 +213,8 @@
     <button id="journalBtn" class="secondary">📖 Справочник городов</button>
     <button id="legendBtn" class="secondary">🗺️ Легенда карты</button>
     <button id="gfxBtn" class="secondary">🎨 Графика: новая</button>
+    <button id="tipsBtn" class="secondary">💡 Подсказки: вкл</button>
+    <button id="tipsResetBtn" class="secondary">💡 Показать подсказки заново</button>
     <button id="restartBtn" class="secondary">🔄 Новая игра</button>
     <button id="bugBtn" class="secondary">🐞 Сообщить об ошибке</button>
   </div>
@@ -207,12 +223,53 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.10.0', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.13.0', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
-const FEEDBACK_USERNAME='';
+const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
 window.addEventListener('error',e=>{ recentErrors.push(`${e.message} @${(e.filename||'').split('/').pop()}:${e.lineno}`); if(recentErrors.length>5) recentErrors.shift(); });
 window.addEventListener('unhandledrejection',e=>{ recentErrors.push('promise: '+String(e.reason&&e.reason.message||e.reason)); if(recentErrors.length>5) recentErrors.shift(); });
+
+/* ================= СТАТИСТИКА ИГРОКОВ (аналитика) =================
+   Обезличенные события пачками уходят POST-запросом на ANALYTICS_URL (веб-приложение Google Apps Script пишет их
+   в Google-таблицу; код приёмника — в инструкции). Пусто = сбор выключен.
+   Игрок = анонимный идентификатор: в Telegram — хеш SHA-256 от id аккаунта (одинаков на всех устройствах,
+   но имя и id не передаются), вне Telegram — случайный, хранится на устройстве. */
+const ANALYTICS_URL='';
+const SESSION_ID=Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+const SESSION_T0=Date.now();
+let analyticsQueue=[], playerId=null;
+function analyticsCtx(){
+  try{ return {day:typeof day!=='undefined'?day:0, cont:typeof curCont!=='undefined'?curCont:0, hero:typeof heroClass!=='undefined'?heroClass:'', hard:typeof hardMode!=='undefined'?!!hardMode:false, lvl:typeof heroLevel!=='undefined'?heroLevel:1}; }catch(e){ return {}; }
+}
+function track(e,d){
+  if(!ANALYTICS_URL) return;
+  analyticsQueue.push(Object.assign({t:Date.now(),e,d:d||{}},analyticsCtx()));
+  if(analyticsQueue.length>=15) flushAnalytics(false);
+}
+async function getPlayerId(){
+  if(playerId) return playerId;
+  const tg=window.Telegram&&window.Telegram.WebApp, uid=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.id;
+  if(uid&&window.crypto&&crypto.subtle){
+    try{ const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('morveyn:'+uid)); playerId='tg_'+[...new Uint8Array(buf)].slice(0,8).map(b=>b.toString(16).padStart(2,'0')).join(''); return playerId; }catch(e){}
+  }
+  try{ playerId=localStorage.getItem('morveyn_pid'); if(!playerId){ playerId='dev_'+Math.random().toString(36).slice(2,12); localStorage.setItem('morveyn_pid',playerId); } }catch(e){ playerId='anon'; }
+  return playerId;
+}
+function analyticsPlatform(){ const tg=window.Telegram&&window.Telegram.WebApp; return tg&&tg.initData?('tg-'+(tg.platform||'?')):'web'; }
+async function flushAnalytics(useBeacon){
+  if(!ANALYTICS_URL||!analyticsQueue.length) return;
+  const events=analyticsQueue.splice(0,analyticsQueue.length);
+  const body=JSON.stringify({pid:await getPlayerId(),sid:SESSION_ID,v:GAME_VERSION,platform:analyticsPlatform(),events});
+  try{
+    if(useBeacon&&navigator.sendBeacon){ navigator.sendBeacon(ANALYTICS_URL,new Blob([body],{type:'text/plain'})); return; }
+    // text/plain + no-cors: без предварительного CORS-запроса, работает с Google Apps Script
+    await fetch(ANALYTICS_URL,{method:'POST',mode:'no-cors',keepalive:true,headers:{'Content-Type':'text/plain'},body});
+  }catch(e){ analyticsQueue.unshift(...events.slice(-30)); }
+}
+setInterval(()=>flushAnalytics(false),30000);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'){ track('session_pause',{sec:Math.round((Date.now()-SESSION_T0)/1000)}); flushAnalytics(true); } });
+window.addEventListener('error',e=>track('error',{msg:String(e.message).slice(0,200),line:e.lineno}));
 /* ================= UNITS (32, 5 factions) ================= */
 const UNITS={
   swordsmen:{name:'Мечники',faction:'human',hp:15,dmg:[2,4],def:2,speed:4,emoji:'⚔️',tier:1,leadershipCost:1,upkeep:1},
@@ -804,7 +861,28 @@ let view='map', curCity=null, curEncounter=null, currentWallBonus=0;
 const TOTAL_PIECES=8;
 
 function expForNext(){ return heroLevel*100; }
-function equipBonus(field){ return SLOTS.reduce((s,slot)=>{ const id=equipment[slot]; if(!id) return s; return s+(ITEMS[id].bonus[field]||0); },0); }
+/* Три героя на выбор. bonus — постоянные надбавки (суммируются со снаряжением через equipBonus),
+   lvlLead/lvlMagic — прибавка за каждый уровень сверх обычной, start() — что герой приносит с собой. 'classic' — для старых сохранений. */
+const HERO_CLASSES={
+  knight:{name:'Эдрик',title:'рыцарь',emoji:'🤺',bonus:{leadership:20,dmg:1},lvlLead:3,lvlMagic:0,
+    desc:'Полководец. +20 к лидерству и +1 к урону всей армии; с каждым уровнем — ещё +3 лидерства.'},
+  sorceress:{name:'Лира',title:'чародейка',emoji:'🧙‍♀️',bonus:{},lvlLead:0,lvlMagic:1,
+    desc:'Маг. +5 к магической силе — заклинания дешевле и доступнее раньше; с собой Исцеление и Огненный шар. С каждым уровнем — ещё +1 маг. сила.',
+    start(){ heroMagicPower+=5; spellCharges.heal=(spellCharges.heal||0)+1; spellCharges.fireball=(spellCharges.fireball||0)+1; }},
+  ranger:{name:'Ярен',title:'следопыт',emoji:'🧝',bonus:{movesPerDay:2,goldPerWeek:15},lvlLead:0,lvlMagic:0,
+    desc:'Путешественник. +2 хода в день и +15💰 в неделю; с собой лишние Лесоруб и Камнетёс.',
+    start(){ workers.lumberjack+=1; workers.stonemason+=1; }},
+  classic:{name:'Герой',title:'странник',emoji:'🧝',bonus:{},lvlLead:0,lvlMagic:0,desc:''},
+};
+let heroClass='classic';
+function heroCls(){ return HERO_CLASSES[heroClass]||HERO_CLASSES.classic; }
+function heroEmoji(){ return heroCls().emoji; }
+function applyHeroClass(cls){
+  heroClass=HERO_CLASSES[cls]?cls:'knight';
+  const h=heroCls(); if(h.start) h.start();
+  movesLeft=MOVE_BUDGET+equipBonus('movesPerDay');
+}
+function equipBonus(field){ return SLOTS.reduce((s,slot)=>{ const id=equipment[slot]; if(!id) return s; return s+(ITEMS[id].bonus[field]||0); },0)+(heroCls().bonus[field]||0); }
 function key(r,c){ return r+','+c; }
 function poiAt(r,c){
   return pois.find(p=>{
@@ -834,6 +912,7 @@ function updateHud(){
   document.getElementById('contName').title=contCfg().name;
   document.getElementById('contTier').textContent=contTier()+1;
   document.getElementById('modeBadge').textContent=hardMode?'⚔️ Жёсткий режим':'🛡️ Обычный режим';
+  { const h=heroCls(); document.getElementById('heroBadge').textContent=`${h.emoji} ${h.name}, ${h.title}`; }
   document.getElementById('hlevel').textContent=heroLevel;
   document.getElementById('hexp').textContent=heroExp;
   document.getElementById('hexpmax').textContent=expForNext();
@@ -843,6 +922,7 @@ function checkLandComplete(){
   if(!landComplete && mapPieces>=TOTAL_PIECES){
     landComplete=true;
     const next=curCont+1;
+    track('land_complete',{land:curCont,days:day,playMin:Math.round(stats.playMs/60000)});
     if(next<CONTINENTS.length){
       unlocked[next]=true;
       setTimeout(()=>setInfo(`🎉 <b>${contCfg().name} покорён!</b> На собранной карте проступил путь в земли ${CONTINENTS[next].emoji} <b>${CONTINENTS[next].name}</b>. Отплыть можно из любой пристани (нужен корабль).`),100);
@@ -869,6 +949,7 @@ function showView(v){
   document.getElementById('titleH1').textContent=titles[v]||'🗺️ Морвейн';
 }
 function triggerGameOver(reason){
+  if(!gameOverPermanent) track('game_over',{reason:String(reason).slice(0,120)});
   gameOverPermanent=true; gameOverReason=reason; saveSoon(true);
   showView('gameover');
   document.getElementById('gameOverView').innerHTML=`
@@ -956,16 +1037,25 @@ function tileClick(r,c){
     }
     return;
   }
+  if(walkAnim) return;
   if(onShip && tch(hero.row,hero.col)==='w') lastWaterPos={r:hero.row,c:hero.col};
-  const pt=pathTiles(dist,r,c); stats.tilesWalked+=pt.walked; stats.tilesSailed+=pt.sailed;
+  const path=heroPath(dist,r,c);
+  path.slice(1).forEach(q=>{ if(tch(q.r,q.c)==='w') stats.tilesSailed++; else stats.tilesWalked++; });
   movesLeft-=dist[k]; hero.row=r; hero.col=c;
-  if(onShip && tch(r,c)!=='w'){ onShip=false; shipPos=lastWaterPos; }
-  const p=poiAt(r,c);
-  if(p) triggerPoi(p); else setInfo(`Ходов осталось: ${movesLeft}.`);
-  renderMap();
-  if(view==='map') processRoamers();
+  if(onShip && tch(r,c)!=='w'){
+    // корабль остаётся у берега — на последней водной клетке пути
+    onShip=false; const lw=path.slice().reverse().find(q=>tch(q.r,q.c)==='w'); shipPos=lw?{r:lw.r,c:lw.c}:lastWaterPos;
+  }
+  startHeroWalk(path,()=>{
+    const p=poiAt(r,c);
+    if(p) triggerPoi(p); else setInfo(`Ходов осталось: ${movesLeft}.`);
+    renderMap();
+    if(view==='map') processRoamers();
+    if(view==='map'&&movesLeft<=0) showTip('day');
+  });
 }
 function showForestAction(r,c){
+  showTip('workers');
   if(workers.lumberjack>0){
     setInfo(`🌲 Густой лес. Отправить 🪓 Лесоруба на расчистку (осталось: ${workers.lumberjack})?<br>
       <button onclick="cutForest(${r},${c})">Расчистить</button>
@@ -981,6 +1071,7 @@ function cutForest(r,c){
   renderMap();
 }
 function showMountainAction(r,c){
+  showTip('workers');
   if(workers.stonemason>0){
     setInfo(`⛰️ Скалы. Отправить ⛏️ Камнетёса разрушить их (осталось: ${workers.stonemason})?<br>
       <button onclick="breakMountain(${r},${c})">Разрушить</button>
@@ -996,6 +1087,7 @@ function breakMountain(r,c){
   renderMap();
 }
 function showBridgeAction(r,c){
+  showTip('workers');
   if(workers.carpenter>0){
     setInfo(`🌊 Здесь вода. Отправить 🔨 Плотника построить мост (осталось: ${workers.carpenter})?<br>
       <button onclick="buildBridge(${r},${c})">Построить мост</button>
@@ -1437,7 +1529,7 @@ function doTownGate(r,c){
 }
 
 /* ================= CITY / CASTLE HUB ================= */
-function openCity(p){ curCity=p; if(p.type==='city') p.seen=true; showView('city'); renderCity(); }
+function openCity(p){ curCity=p; if(p.type==='city'){ p.seen=true; showTip('city'); } showView('city'); renderCity(); }
 function sellPrice(key){ return Math.max(1, Math.round(UNITS[key].upkeep*4)); }
 function recruitUnit(pr,pc,k,qty){
   pr=Number(pr); pc=Number(pc);
@@ -1449,7 +1541,7 @@ function recruitUnit(pr,pc,k,qty){
   const total=cost*qty;
   if(gold<total){ renderCity('Недостаточно золота.'); return; }
   const need=qty*UNITS[k].leadershipCost;
-  if(leadershipUsed()+need>leadershipMax()){ renderCity(`Не хватает лидерства: нужно ${leadershipUsed()+need}, доступно ${leadershipMax()}.`); return; }
+  if(leadershipUsed()+need>leadershipMax()){ showTip('leadership'); renderCity(`Не хватает лидерства: нужно ${leadershipUsed()+need}, доступно ${leadershipMax()}.`); return; }
   let existing=army.find(a=>a.key===k && a.hp>0);
   let slot=null;
   if(!existing){ slot=freeSlot(); if(!slot){ renderCity('⚠️ Все 10 слотов армии заняты (5 актив + 5 резерв). Распустите или объедините отряды.'); return; } }
@@ -1633,7 +1725,7 @@ function bOccupied(r,c){ return stacks.some(s=>s.hp>0&&s.row===r&&s.col===c); }
 function bLog(t){ logLines.push(t); if(logLines.length>60) logLines.shift(); }
 function syncArmyFromBattle(){ stacks.filter(s=>s.side==='player').forEach(s=>{ const a=army.find(x=>x.id===s.armyId); if(a) a.hp=s.hp; }); }
 function beginBattle(enc){
-  logLines=[]; battleOver=false;
+  logLines=[]; battleOver=false; showTip('battle');
   lastBattleEnemyPower=power(enc.enemies,false);
   const prows=[0,2,3,5];
   stacks=activeStacks().map((a,i)=>({id:'p'+a.id,side:'player',key:a.key,hp:a.hp,startHp:a.hp,maxHp:a.max,row:prows[i]||i,col:0,armyId:a.id}));
@@ -1659,12 +1751,15 @@ function checkBattleEnd(){
   if(!p){ battleOver=true; onDefeat(); } else if(!e){ battleOver=true; onVictory(); }
 }
 function checkLevelUp(){
-  while(heroExp>=expForNext()){ heroExp-=expForNext(); heroLevel++; bonusLeadership+=5; heroMagicPower+=1;
-    bLog && bLog(`🌟 Новый уровень! Герой ${heroLevel} ур. (+5 к лидерству, +1 к магической силе).`);
+  while(heroExp>=expForNext()){ heroExp-=expForNext(); heroLevel++;
+    const h=heroCls(), dl=5+(h.lvlLead||0), dm=1+(h.lvlMagic||0);
+    bonusLeadership+=dl; heroMagicPower+=dm;
+    bLog && bLog(`🌟 Новый уровень! ${h.name} ${heroLevel} ур. (+${dl} к лидерству, +${dm} к магической силе).`);
   }
 }
 function onVictory(){
   bLog('🏆 Победа!'); syncArmyFromBattle();
+  track('battle',{res:'win',kind:curEncounter&&curEncounter.type,pow:lastBattleEnemyPower});
   stats.battlesWon++; battleCasualties(); stats.strongestFoe=Math.max(stats.strongestFoe,lastBattleEnemyPower);
   currentWallBonus=0;
   const expGain=Math.max(10,Math.round(lastBattleEnemyPower/3));
@@ -1729,6 +1824,7 @@ function onVictory(){
 }
 function onDefeat(){
   bLog('💀 Отряд разбит и отступает...');
+  track('battle',{res:'loss',kind:curEncounter&&curEncounter.type,pow:lastBattleEnemyPower}); setTimeout(()=>showTip('defeat'),1500);
   stats.battlesLost++; battleCasualties();
   currentWallBonus=0;
   army.forEach(a=>a.hp=Math.round(a.max*0.5));
@@ -1927,7 +2023,7 @@ window.addEventListener('orientationchange',relayout);
 })();
 
 function tileIcon(r,c){
-  if(r===hero.row&&c===hero.col) return onShip?'⛵':'🧝';
+  if(r===hero.row&&c===hero.col) return onShip?'⛵':heroEmoji();
   if(shipPos && r===shipPos.r && c===shipPos.c) return '⛵';
   if(sorcerer && sorcerer.active && r===sorcerer.r && c===sorcerer.c) return '🌑';
   const p=poiAt(r,c); if(!p) return '';
@@ -1941,6 +2037,7 @@ function renderMap(){
   const camCol=Math.max(0,Math.min(COLS-VIEW_COLS, hero.col-Math.floor(VIEW_COLS/2)));
   camRowG=camRow; camColG=camCol;
   const mapEl=document.getElementById('map');
+  setTimeout(checkVisibleTips,0);
   if(gfxMode==='new'){ mapEl.classList.add('gfx'); drawMapCanvas(dist,camRow,camCol); updateHud(); return; }
   mapEl.classList.remove('gfx');
   for(let rr=0;rr<VIEW_ROWS;rr++) for(let cc=0;cc<VIEW_COLS;cc++){
@@ -1954,160 +2051,376 @@ function renderMap(){
   updateHud();
 }
 
-/* ================= GRAPHICS: CANVAS MAP (прототип) =================
-   Слои: 1) земля — процедурные текстуры с 4 вариантами на тип (вариант выбирается хешем клетки, поэтому картинка стабильна);
-   2) вода с береговой полосой и пеной по маске соседей (4 стороны + внешние углы);
-   3) дороги и мосты — 4-битная маска связей (N=1, E=2, S=4, W=8), города/замки/пристани считаются узлами дороги;
-   4) лес (группы деревьев) и горы (вершины) — объекты поверх земли, могут нависать над соседями;
-   5) подсветка доступных клеток; 6) значки.
-   Палитра своя у каждой земли. Текстуры рисуются один раз на размер клетки и палитру и кешируются. */
+/* ================= GRAPHICS: CANVAS MAP =================
+   Процедурная 2D-графика. Порядок слоёв:
+   1) грунт — текстуры (4 варианта на тип, вариант = хеш клетки → картинка стабильна);
+   2) мягкие переходы: «старший» грунт соседа заходит на клетку рваной полосой (стороны) или пятном (внешние углы).
+      Старшинство: вода < песок < болото < трава < скалы;
+   3) берег — пена и песчаная полоса по маске суши вокруг водной клетки, вогнутые углы скругляются сами;
+   4) дороги и мосты — 4-битная маска связей (N=1, E=2, S=4, W=8);
+   5) мелкий декор на траве — цветы, камни, кочки;
+   6) лес и горы — объекты, отсортированные по высоте на экране; у опушки деревья редеют и смещаются вглубь массива,
+      у одиночной скалы — одна невысокая вершина, в хребте — две крупные;
+   7) значки, подсветка ходов, виньетка и тон земли.
+   Анимация: герой идёт по своему пути клетка за клеткой, камера плавно следует. Статичный мир на время шага
+   рисуется один раз во внеэкранный холст, в кадрах — только сдвиг и герой. */
 let gfxMode=(()=>{ try{ return localStorage.getItem('morveyn_gfx')||'new'; }catch(e){ return 'new'; } })();
 function setGfxMode(m){ gfxMode=m; try{ localStorage.setItem('morveyn_gfx',m); }catch(e){} renderMap(); }
 const PALETTES=[
   {grass:['#5b8c3b','#4b7a30','#6f9f49'],sand:['#d8c08a','#c4a96f'],swamp:['#4d5a35','#3a4a3a'],rock:['#77695a','#5d5246','#9a8c7a'],
-   water:['#2c6b90','#3f88ae'],beach:'#d9c590',tree:['#1f4a26','#2c6431','#3d823e'],peak:['#6c6052','#a1937f',null],road:['#b39463','#6e5638']},
+   water:['#2c6b90','#3f88ae'],beach:'#d9c590',tree:['#1f4a26','#2c6431','#3d823e'],peak:['#6c6052','#a1937f',null],road:['#b39463','#6e5638'],
+   flower:['#f2e36b','#e98bb0','#ffffff'],tint:null},
   {grass:['#8f9a4c','#7a8640','#a5ae5e'],sand:['#e3c47f','#cfab63'],swamp:['#6b6a3c','#57583a'],rock:['#9b7b5b','#7a5f45','#bb9c7b'],
-   water:['#2a7b8f','#45a0b0'],beach:'#ead39a',tree:['#4a5a2a','#5f7135','#76893f'],peak:['#94704f','#c39f78',null],road:['#c49c66','#7e6140']},
+   water:['#2a7b8f','#45a0b0'],beach:'#ead39a',tree:['#4a5a2a','#5f7135','#76893f'],peak:['#94704f','#c39f78',null],road:['#c49c66','#7e6140'],
+   flower:['#f0c04a','#d9763b','#f6e7b0'],tint:'rgba(255,190,90,0.07)'},
   {grass:['#b9ccc5','#a0b6af','#dae6e2'],sand:['#e9eff1','#d3dde1'],swamp:['#91a5aa','#7d9399'],rock:['#8a909b','#6e737d','#b3b8c2'],
-   water:['#3a7fa8','#78b2d0'],beach:'#eef3f5',tree:['#1d4a3e','#2a5e4f','#3b7562'],peak:['#7d838f','#c2c8d2','#f6f9fb'],road:['#b4a998','#76695b']},
+   water:['#3a7fa8','#78b2d0'],beach:'#eef3f5',tree:['#1d4a3e','#2a5e4f','#3b7562'],peak:['#7d838f','#c2c8d2','#f6f9fb'],road:['#b4a998','#76695b'],
+   flower:['#ffffff','#cfe6f2','#9ec9e0'],tint:'rgba(150,200,255,0.08)'},
   {grass:['#6b6355','#5a5347','#827865'],sand:['#8e6d55','#76583f'],swamp:['#4f3b33','#3e2d27'],rock:['#4c403b','#3a302c','#6e5b51'],
-   water:['#2f4f63','#4a6d80'],beach:'#7a6758',tree:['#352c24','#46392d','#5a4836'],peak:['#463a35','#6f5a50','#c4532f'],road:['#988670','#55493b']},
+   water:['#2f4f63','#4a6d80'],beach:'#7a6758',tree:['#352c24','#46392d','#5a4836'],peak:['#463a35','#6f5a50','#c4532f'],road:['#988670','#55493b'],
+   flower:['#e8622c','#f2a03a','#3a302a'],tint:'rgba(255,80,30,0.07)'},
   {grass:['#3f4e3b','#334030','#506149'],sand:['#6f6a5b','#5b5749'],swamp:['#35412f','#283325'],rock:['#4a4652','#38353f','#68636f'],
-   water:['#243b50','#365670'],beach:'#5e5a4d',tree:['#1b2a22','#24372d','#304738'],peak:['#47434f','#6d6878',null],road:['#7d7563','#45403a']},
+   water:['#243b50','#365670'],beach:'#5e5a4d',tree:['#1b2a22','#24372d','#304738'],peak:['#47434f','#6d6878',null],road:['#7d7563','#45403a'],
+   flower:['#9b7fd1','#c7b8e8','#6fd1b0'],tint:'rgba(60,30,110,0.12)'},
 ];
 function pal(){ return PALETTES[curCont]||PALETTES[0]; }
-function hash2(r,c,s){ let h=(r*73856093)^(c*19349663)^((s||0)*83492791); h=(h^(h>>>13))*1274126177; return ((h^(h>>>16))>>>0); }
+function hash2(r,c,s){ let h=(r*73856093)^(c*19349663)^((s||0)*83492791); h=Math.imul(h^(h>>>13),1274126177); return ((h^(h>>>16))>>>0); }
 function hrand(r,c,s){ return hash2(r,c,s)/4294967296; }
-let texCache={key:'',tex:{}};
-function makeTex(T,dpr,draw,seed){
-  const cv=document.createElement('canvas'); cv.width=Math.ceil(T*dpr); cv.height=Math.ceil(T*dpr);
-  const g=cv.getContext('2d'); g.scale(dpr,dpr); const rng=mulberry32(seed); draw(g,T,rng); return cv;
-}
-function buildTextures(T,dpr){
-  const P=pal(), tex={};
-  const speckle=(g,T,rng,cols,n,w,h)=>{ for(let i=0;i<n;i++){ g.fillStyle=cols[Math.floor(rng()*cols.length)]; g.globalAlpha=0.35+rng()*0.4; g.fillRect(rng()*T,rng()*T,w*(0.6+rng()*0.8),h*(0.6+rng()*0.8)); } g.globalAlpha=1; };
-  for(let v=0;v<4;v++){
-    tex['g'+v]=makeTex(T,dpr,(g,T,rng)=>{ g.fillStyle=P.grass[0]; g.fillRect(0,0,T,T); speckle(g,T,rng,[P.grass[1],P.grass[2]],Math.round(T*1.4),T*0.05,T*0.09); },100+v);
-    tex['d'+v]=makeTex(T,dpr,(g,T,rng)=>{ g.fillStyle=P.sand[0]; g.fillRect(0,0,T,T);
-      g.strokeStyle=P.sand[1]; g.globalAlpha=0.55; g.lineWidth=Math.max(1,T*0.04);
-      for(let i=0;i<2;i++){ const y=T*(0.25+0.45*i+rng()*0.15); g.beginPath(); g.moveTo(-2,y); g.quadraticCurveTo(T*0.5,y-T*0.14,T+2,y); g.stroke(); }
-      g.globalAlpha=1; speckle(g,T,rng,[P.sand[1]],Math.round(T*0.5),T*0.03,T*0.03); },200+v);
-    tex['s'+v]=makeTex(T,dpr,(g,T,rng)=>{ g.fillStyle=P.swamp[0]; g.fillRect(0,0,T,T); speckle(g,T,rng,[P.grass[1]],Math.round(T*0.6),T*0.05,T*0.08);
-      for(let i=0;i<2;i++){ g.fillStyle=P.swamp[1]; g.globalAlpha=0.9; g.beginPath(); g.ellipse(T*(0.2+rng()*0.6),T*(0.2+rng()*0.6),T*(0.12+rng()*0.1),T*(0.06+rng()*0.05),0,0,Math.PI*2); g.fill(); }
-      g.globalAlpha=1; g.strokeStyle=P.grass[2]; g.lineWidth=Math.max(1,T*0.03);
-      for(let i=0;i<3;i++){ const x=rng()*T, y=T*(0.3+rng()*0.6); g.beginPath(); g.moveTo(x,y); g.lineTo(x+T*0.03,y-T*0.18); g.stroke(); } },300+v);
-    tex['w'+v]=makeTex(T,dpr,(g,T,rng)=>{ const gr=g.createLinearGradient(0,0,T,T); gr.addColorStop(0,P.water[0]); gr.addColorStop(1,P.water[1]); g.fillStyle=P.water[0]; g.fillRect(0,0,T,T);
-      g.globalAlpha=0.35; g.fillStyle=gr; g.fillRect(0,0,T,T); g.globalAlpha=0.35; g.strokeStyle='#ffffff'; g.lineWidth=Math.max(1,T*0.03);
-      for(let i=0;i<2;i++){ const x=rng()*T*0.7, y=T*(0.2+rng()*0.6); g.beginPath(); g.moveTo(x,y); g.quadraticCurveTo(x+T*0.08,y-T*0.06,x+T*0.16,y); g.quadraticCurveTo(x+T*0.24,y+T*0.06,x+T*0.32,y); g.stroke(); }
-      g.globalAlpha=1; },400+v);
-    tex['m'+v]=makeTex(T,dpr,(g,T,rng)=>{ g.fillStyle=P.rock[0]; g.fillRect(0,0,T,T); speckle(g,T,rng,[P.rock[1],P.rock[2]],Math.round(T*0.9),T*0.06,T*0.05); },500+v);
-  }
-  return tex;
-}
 function terrAt(r,c){ return (r<0||r>=ROWS||c<0||c>=COLS)?'w':terrainGrid[r][c]; }
 function isBridge(r,c){ return terrAt(r,c)==='r' && ((terrAt(r-1,c)==='w'&&terrAt(r+1,c)==='w')||(terrAt(r,c-1)==='w'&&terrAt(r,c+1)==='w')); }
 function isWaterish(r,c){ return terrAt(r,c)==='w'||isBridge(r,c); }
+const GROUND_PRI={w:0,d:1,s:2,g:3,m:4};
+function baseGround(t){ return t==='d'?'d':t==='s'?'s':t==='m'?'m':'g'; }
+/* Под дорогой — грунт, которого больше всего вокруг (дорога через пустыню идёт по песку, а не по траве). */
+function groundAt(r,c){
+  if(isWaterish(r,c)) return 'w';
+  const t=terrAt(r,c); if(t!=='r') return baseGround(t);
+  const cnt={}; [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]].forEach(([dr,dc])=>{ const n=terrAt(r+dr,c+dc); if(n!=='w'&&n!=='r'&&n!=='m'){ const b=baseGround(n); cnt[b]=(cnt[b]||0)+1; } });
+  let best='g',bn=0; Object.entries(cnt).forEach(([k,v])=>{ if(v>bn){bn=v;best=k;} }); return best;
+}
 function isRoadNode(r,c){
   if(terrAt(r,c)==='r') return true;
-  const p=pois.find(q=>q.r===r&&q.c===c); return !!p&&['city','castle','governor','port'].includes(p.type);
+  const p=poiAt(r,c); return !!p&&['city','castle','governor','port'].includes(p.type);
 }
-function drawMapCanvas(dist,camRow,camCol){
-  const mapEl=document.getElementById('map');
-  const T=TILE_PX, W=VIEW_COLS*T, H=VIEW_ROWS*T, dpr=Math.min(3,window.devicePixelRatio||1);
-  let cv=mapEl.querySelector('canvas');
-  if(!cv){ mapEl.innerHTML=''; cv=document.createElement('canvas'); mapEl.appendChild(cv);
-    cv.addEventListener('click',e=>{ const b=cv.getBoundingClientRect(); const c=Math.floor((e.clientX-b.left)/(b.width/VIEW_COLS)), r=Math.floor((e.clientY-b.top)/(b.height/VIEW_ROWS));
-      if(r>=0&&r<VIEW_ROWS&&c>=0&&c<VIEW_COLS) tileClick(camRowG+r,camColG+c); }); }
-  if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){ cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr); cv.style.width=W+'px'; cv.style.height=H+'px'; }
-  const ck=T+'|'+dpr+'|'+curCont;
-  if(texCache.key!==ck){ texCache={key:ck,tex:buildTextures(T,dpr)}; }
-  const tex=texCache.tex, P=pal(), g=cv.getContext('2d');
-  g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
-  const blit=(name,x,y)=>g.drawImage(tex[name],x,y,T,T);
-  // слой 1–3: земля, вода с берегом, дороги
-  for(let rr=0;rr<VIEW_ROWS;rr++) for(let cc=0;cc<VIEW_COLS;cc++){
-    const r=camRow+rr, c=camCol+cc, t=terrAt(r,c), x=cc*T, y=rr*T, v=hash2(r,c)%4;
-    if(isWaterish(r,c)){
-      blit('w'+v,x,y);
-      // берег: полосы песка с пеной вдоль сторон, где суша; скруглённые внешние углы
-      const land=(dr,dc)=>!isWaterish(r+dr,c+dc);
-      const s=T*0.17; g.fillStyle=P.beach;
-      const N=land(-1,0),E=land(0,1),S=land(1,0),Wd=land(0,-1);
-      if(N) g.fillRect(x,y,T,s); if(S) g.fillRect(x,y+T-s,T,s); if(Wd) g.fillRect(x,y,s,T); if(E) g.fillRect(x+T-s,y,s,T);
-      // внешний угол: четверть круга строго внутри клетки (клип), продолжающая полосы соседей
-      const corner=(cx,cy,on)=>{ if(!on) return; g.save(); g.beginPath(); g.rect(x,y,T,T); g.clip();
-        g.beginPath(); g.arc(cx,cy,s,0,Math.PI*2); g.fill();
-        g.strokeStyle='rgba(255,255,255,0.55)'; g.lineWidth=Math.max(1,T*0.035); g.beginPath(); g.arc(cx,cy,s+1,0,Math.PI*2); g.stroke(); g.restore(); };
-      corner(x,y,!N&&!Wd&&land(-1,-1)); corner(x+T,y,!N&&!E&&land(-1,1)); corner(x,y+T,!S&&!Wd&&land(1,-1)); corner(x+T,y+T,!S&&!E&&land(1,1));
-      g.strokeStyle='rgba(255,255,255,0.55)'; g.lineWidth=Math.max(1,T*0.035); g.beginPath();
-      if(N){ g.moveTo(x,y+s+1); g.lineTo(x+T,y+s+1); } if(S){ g.moveTo(x,y+T-s-1); g.lineTo(x+T,y+T-s-1); }
-      if(Wd){ g.moveTo(x+s+1,y); g.lineTo(x+s+1,y+T); } if(E){ g.moveTo(x+T-s-1,y); g.lineTo(x+T-s-1,y+T); }
-      g.stroke();
-      if(isBridge(r,c)){ // мост: доски поперёк направления
-        const horiz=terrAt(r,c-1)!=='w'||terrAt(r,c+1)!=='w';
-        g.fillStyle=P.road[1]; g.fillRect(horiz?x:x+T*0.28,horiz?y+T*0.28:y,horiz?T:T*0.44,horiz?T*0.44:T);
-        g.strokeStyle='rgba(0,0,0,0.35)'; g.lineWidth=1; g.beginPath();
-        for(let i=1;i<5;i++){ if(horiz){ g.moveTo(x+i*T/5,y+T*0.28); g.lineTo(x+i*T/5,y+T*0.72); } else { g.moveTo(x+T*0.28,y+i*T/5); g.lineTo(x+T*0.72,y+i*T/5); } }
-        g.stroke();
-      }
-      continue;
-    }
-    if(t==='d') blit('d'+v,x,y); else if(t==='s') blit('s'+v,x,y); else if(t==='m') blit('m'+v,x,y); else blit('g'+v,x,y);
-    if(t==='r'){
-      const m=(isRoadNode(r-1,c)?1:0)|(isRoadNode(r,c+1)?2:0)|(isRoadNode(r+1,c)?4:0)|(isRoadNode(r,c-1)?8:0);
-      const w=T*0.5, o=(T-w)/2;
-      const segs=[[1,x+o,y,w,T/2+w/2],[2,x+T/2-w/2,y+o,T/2+w/2,w],[4,x+o,y+T/2-w/2,w,T/2+w/2],[8,x,y+o,T/2+w/2,w]];
-      [[P.road[1],0],[P.road[0],T*0.07]].forEach(([col,inset])=>{ g.fillStyle=col;
-        g.beginPath(); g.arc(x+T/2,y+T/2,w/2-inset,0,Math.PI*2); g.fill();
-        segs.forEach(([bit,sx,sy,sw,sh])=>{ if(m&bit){ const ix=(bit===1||bit===4)?inset:0, iy=(bit===2||bit===8)?inset:0; g.fillRect(sx+ix,sy+iy,sw-2*ix,sh-2*iy); } }); });
-    }
+const DIRS8G={N:[-1,0],E:[0,1],S:[1,0],W:[0,-1],NE:[-1,1],SE:[1,1],SW:[1,-1],NW:[-1,-1]};
+const DIR_ANGLE={N:0,E:Math.PI/2,S:Math.PI,W:-Math.PI/2,NE:0,SE:Math.PI/2,SW:Math.PI,NW:-Math.PI/2};
+
+/* ---------- кеш текстур, масок и наложений ---------- */
+let gfxCache={key:'',tex:{},ovl:{}};
+function newCanvas(T,dpr){ const cv=document.createElement('canvas'); cv.width=Math.ceil(T*dpr); cv.height=Math.ceil(T*dpr); const g=cv.getContext('2d'); g.scale(dpr,dpr); return [cv,g]; }
+function buildTextures(T,dpr){
+  const P=pal(), tex={};
+  const make=(draw,seed)=>{ const [cv,g]=newCanvas(T,dpr); draw(g,mulberry32(seed)); return cv; };
+  const speckle=(g,rng,cols,n,w,h)=>{ for(let i=0;i<n;i++){ g.fillStyle=cols[Math.floor(rng()*cols.length)]; g.globalAlpha=0.3+rng()*0.4; g.fillRect(rng()*T,rng()*T,w*(0.6+rng()*0.8),h*(0.6+rng()*0.8)); } g.globalAlpha=1; };
+  for(let v=0;v<4;v++){
+    tex['g'+v]=make((g,rng)=>{ g.fillStyle=P.grass[0]; g.fillRect(0,0,T,T); speckle(g,rng,[P.grass[1],P.grass[2]],Math.round(T*1.4),T*0.05,T*0.09); },100+v);
+    tex['d'+v]=make((g,rng)=>{ g.fillStyle=P.sand[0]; g.fillRect(0,0,T,T);
+      g.strokeStyle=P.sand[1]; g.globalAlpha=0.5; g.lineWidth=Math.max(1,T*0.04);
+      for(let i=0;i<2;i++){ const y=T*(0.25+0.45*i+rng()*0.15); g.beginPath(); g.moveTo(-2,y); g.quadraticCurveTo(T*0.5,y-T*0.14,T+2,y); g.stroke(); }
+      g.globalAlpha=1; speckle(g,rng,[P.sand[1]],Math.round(T*0.5),T*0.03,T*0.03); },200+v);
+    tex['s'+v]=make((g,rng)=>{ g.fillStyle=P.swamp[0]; g.fillRect(0,0,T,T); speckle(g,rng,[P.grass[1]],Math.round(T*0.6),T*0.05,T*0.08);
+      for(let i=0;i<2;i++){ g.fillStyle=P.swamp[1]; g.globalAlpha=0.9; g.beginPath(); g.ellipse(T*(0.2+rng()*0.6),T*(0.2+rng()*0.6),T*(0.12+rng()*0.1),T*(0.06+rng()*0.05),0,0,Math.PI*2); g.fill(); }
+      g.globalAlpha=1; g.strokeStyle=P.grass[2]; g.lineWidth=Math.max(1,T*0.03);
+      for(let i=0;i<3;i++){ const x=rng()*T, y=T*(0.3+rng()*0.6); g.beginPath(); g.moveTo(x,y); g.lineTo(x+T*0.03,y-T*0.18); g.stroke(); } },300+v);
+    tex['w'+v]=make((g,rng)=>{ g.fillStyle=P.water[0]; g.fillRect(0,0,T,T);
+      const gr=g.createLinearGradient(0,0,T,T); gr.addColorStop(0,P.water[0]); gr.addColorStop(1,P.water[1]); g.globalAlpha=0.35; g.fillStyle=gr; g.fillRect(0,0,T,T);
+      g.globalAlpha=0.3; g.strokeStyle='#ffffff'; g.lineWidth=Math.max(1,T*0.03);
+      for(let i=0;i<2;i++){ const x=rng()*T*0.7, y=T*(0.2+rng()*0.6); g.beginPath(); g.moveTo(x,y); g.quadraticCurveTo(x+T*0.08,y-T*0.06,x+T*0.16,y); g.quadraticCurveTo(x+T*0.24,y+T*0.06,x+T*0.32,y); g.stroke(); }
+      g.globalAlpha=1; },400+v);
+    tex['m'+v]=make((g,rng)=>{ g.fillStyle=P.rock[0]; g.fillRect(0,0,T,T); speckle(g,rng,[P.rock[1],P.rock[2]],Math.round(T*0.9),T*0.06,T*0.05); },500+v);
   }
-  // слой 4: лес и горы (сверху вниз, чтобы нижние перекрывали верхние)
-  for(let rr=-1;rr<=VIEW_ROWS;rr++) for(let cc=-1;cc<=VIEW_COLS;cc++){
-    const r=camRow+rr, c=camCol+cc, t=terrAt(r,c), x=cc*T, y=rr*T;
-    if(t==='f'){
-      const n=3+(hash2(r,c,7)%2), trees=[];
-      for(let i=0;i<n;i++) trees.push([x+T*(0.18+hrand(r,c,10+i)*0.64), y+T*(0.22+hrand(r,c,20+i)*0.6), T*(0.2+hrand(r,c,30+i)*0.08)]);
-      trees.sort((a,b)=>a[1]-b[1]).forEach(([tx,ty,tr])=>{
-        g.fillStyle='rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(tx+tr*0.15,ty+tr*0.9,tr*0.9,tr*0.35,0,0,Math.PI*2); g.fill();
-        g.fillStyle=P.tree[0]; g.beginPath(); g.arc(tx,ty,tr,0,Math.PI*2); g.fill();
-        g.fillStyle=P.tree[1]; g.beginPath(); g.arc(tx-tr*0.15,ty-tr*0.15,tr*0.75,0,Math.PI*2); g.fill();
-        g.fillStyle=P.tree[2]; g.beginPath(); g.arc(tx-tr*0.3,ty-tr*0.32,tr*0.35,0,Math.PI*2); g.fill();
-        if(curCont===2){ g.fillStyle='rgba(255,255,255,0.8)'; g.beginPath(); g.arc(tx-tr*0.2,ty-tr*0.45,tr*0.25,0,Math.PI*2); g.fill(); }
+  tex.beach=make((g,rng)=>{ g.fillStyle=P.beach; g.fillRect(0,0,T,T); speckle(g,rng,[P.sand[1]],Math.round(T*0.4),T*0.03,T*0.03); },600);
+  tex.foam=make(g=>{ g.fillStyle='rgba(255,255,255,0.55)'; g.fillRect(0,0,T,T); },700);
+  return tex;
+}
+/* Маска рваной полосы вдоль стороны (dir = N/E/S/W) или пятна в углу (NE/SE/SW/NW). Глубина на концах полосы фиксирована,
+   поэтому полосы соседних клеток стыкуются без ступенек. */
+function maskCanvas(T,dpr,dir,depth,seed){
+  const [cv,g]=newCanvas(T,dpr), rng=mulberry32(seed);
+  g.translate(T/2,T/2); g.rotate(DIR_ANGLE[dir]); g.translate(-T/2,-T/2);
+  g.fillStyle='#000'; g.beginPath();
+  if(dir.length===1){
+    g.moveTo(0,0); g.lineTo(T,0); g.lineTo(T,depth);
+    const n=6; for(let i=n-1;i>0;i--){ const x=T*i/n, y=depth*(0.7+rng()*0.65); g.lineTo(x,y); }
+    g.lineTo(0,depth); g.closePath();
+  } else {
+    // угол NE в повороте 0: пятно в правом верхнем углу
+    const R=depth*1.05; g.moveTo(T,0); g.lineTo(T-R,0);
+    const n=5; for(let i=1;i<n;i++){ const a=Math.PI/2*i/n, rr=R*(0.8+rng()*0.4); g.lineTo(T-Math.cos(a)*rr,Math.sin(a)*rr); }
+    g.lineTo(T,R); g.closePath();
+  }
+  g.fill(); return cv;
+}
+function overlayTex(T,dpr,src,dir,depth,v){
+  const k=src+'|'+dir+'|'+depth.toFixed(2)+'|'+v;
+  let o=gfxCache.ovl[k]; if(o) return o;
+  const [cv,g]=newCanvas(T,dpr);
+  g.setTransform(1,0,0,1,0,0); g.drawImage(gfxCache.tex[src],0,0);
+  g.globalCompositeOperation='destination-in'; g.drawImage(maskCanvas(T,dpr,dir,depth*T,9000+v*31+dir.length*7+dir.charCodeAt(0)),0,0);
+  gfxCache.ovl[k]=cv; return cv;
+}
+function ensureGfxCache(T,dpr){ const ck=T+'|'+dpr+'|'+curCont; if(gfxCache.key!==ck) gfxCache={key:ck,tex:buildTextures(T,dpr),ovl:{}}; }
+
+/* ---------- отрисовка мира: область (R0,C0)…(R0+nR, C0+nC) в контекст с началом в (0,0) ---------- */
+function drawWorld(g,T,dpr,R0,C0,nR,nC,opts){
+  const P=pal(), tex=gfxCache.tex, blit=(cv,x,y)=>g.drawImage(cv,x,y,T,T);
+  const X=c=>(c-C0)*T, Y=r=>(r-R0)*T;
+  const roadCells=[];
+  // 1–3: грунт, переходы, берег
+  for(let r=R0;r<R0+nR;r++) for(let c=C0;c<C0+nC;c++){
+    const x=X(c), y=Y(r), v=hash2(r,c)%4, gr=groundAt(r,c);
+    blit(tex[gr+v],x,y);
+    if(gr==='w'){
+      const land=d=>groundAt(r+DIRS8G[d][0],c+DIRS8G[d][1])!=='w';
+      const sides=['N','E','S','W'].filter(land);
+      const corners=[['NE','N','E'],['SE','S','E'],['SW','S','W'],['NW','N','W']].filter(([d,a,b])=>land(d)&&!land(a)&&!land(b)).map(x=>x[0]);
+      [...sides,...corners].forEach(d=>blit(overlayTex(T,dpr,'foam',d,0.3,v%2),x,y));
+      [...sides,...corners].forEach(d=>blit(overlayTex(T,dpr,'beach',d,0.19,v%2),x,y));
+    } else {
+      const myP=GROUND_PRI[gr], seen=new Set();
+      Object.keys(DIRS8G).forEach(d=>{ const t=groundAt(r+DIRS8G[d][0],c+DIRS8G[d][1]); if(t!=='w'&&GROUND_PRI[t]>myP) seen.add(t); });
+      [...seen].sort((a,b)=>GROUND_PRI[a]-GROUND_PRI[b]).forEach(t=>{
+        const is=d=>groundAt(r+DIRS8G[d][0],c+DIRS8G[d][1])===t;
+        ['N','E','S','W'].forEach(d=>{ if(is(d)) blit(overlayTex(T,dpr,t+(v%2),d,0.27,v%2),x,y); });
+        [['NE','N','E'],['SE','S','E'],['SW','S','W'],['NW','N','W']].forEach(([d,a,b])=>{ if(is(d)&&!is(a)&&!is(b)) blit(overlayTex(T,dpr,t+(v%2),d,0.27,v%2),x,y); });
       });
-    } else if(t==='m'){
-      const n=1+(hash2(r,c,3)%2);
-      for(let i=0;i<n;i++){
-        const bx=x+T*(n===1?0.5:(i?0.68:0.34)), base=y+T*(0.92-i*0.05), hgt=T*(0.62+hrand(r,c,40+i)*0.22), hw=T*(n===1?0.42:0.32);
-        const px=bx+(hrand(r,c,50+i)-0.5)*T*0.12, py=base-hgt;
-        g.fillStyle=P.peak[0]; g.beginPath(); g.moveTo(bx-hw,base); g.lineTo(px,py); g.lineTo(bx+hw,base); g.closePath(); g.fill();
-        g.fillStyle=P.peak[1]; g.beginPath(); g.moveTo(bx-hw,base); g.lineTo(px,py); g.lineTo(px+hw*0.12,base); g.closePath(); g.fill();
-        const cap=P.peak[2]||(curCont===0||curCont===1?null:null);
-        if(P.peak[2]){ g.fillStyle=P.peak[2]; g.beginPath(); g.moveTo(px,py); g.lineTo(px-hw*0.28,py+hgt*0.28); g.lineTo(px+hw*0.28,py+hgt*0.28); g.closePath(); g.fill(); }
-      }
+    }
+    // 4: мост и дорога
+    if(isBridge(r,c)){
+      const horiz=terrAt(r,c-1)!=='w'||terrAt(r,c+1)!=='w';
+      g.fillStyle='rgba(0,0,0,0.25)'; g.fillRect(horiz?x:x+T*0.3,horiz?y+T*0.3+2:y+2,horiz?T:T*0.44,horiz?T*0.44:T);
+      g.fillStyle=P.road[1]; g.fillRect(horiz?x:x+T*0.28,horiz?y+T*0.28:y,horiz?T:T*0.44,horiz?T*0.44:T);
+      g.strokeStyle='rgba(0,0,0,0.35)'; g.lineWidth=1; g.beginPath();
+      for(let i=1;i<5;i++){ if(horiz){ g.moveTo(x+i*T/5,y+T*0.28); g.lineTo(x+i*T/5,y+T*0.72); } else { g.moveTo(x+T*0.28,y+i*T/5); g.lineTo(x+T*0.72,y+i*T/5); } }
+      g.stroke();
+    } else if(terrAt(r,c)==='r'){ roadCells.push([r,c,x,y]); }
+    // 5: декор на свободной траве
+    if(terrAt(r,c)==='g' && !poiAt(r,c)){
+      const h=hrand(r,c,90);
+      if(h<0.11){ for(let i=0;i<4;i++){ g.fillStyle=P.flower[(hash2(r,c,91+i))%P.flower.length]; g.beginPath(); g.arc(x+T*(0.2+hrand(r,c,95+i)*0.6),y+T*(0.2+hrand(r,c,99+i)*0.6),Math.max(1,T*0.035),0,Math.PI*2); g.fill(); } }
+      else if(h<0.18){ const sx=x+T*(0.3+hrand(r,c,92)*0.4), sy=y+T*(0.35+hrand(r,c,93)*0.4);
+        g.fillStyle='rgba(0,0,0,0.22)'; g.beginPath(); g.ellipse(sx+1,sy+T*0.05,T*0.09,T*0.04,0,0,Math.PI*2); g.fill();
+        g.fillStyle=P.rock[0]; g.beginPath(); g.ellipse(sx,sy,T*0.08,T*0.06,0,0,Math.PI*2); g.fill();
+        g.fillStyle=P.rock[2]; g.beginPath(); g.ellipse(sx-T*0.02,sy-T*0.02,T*0.035,T*0.025,0,0,Math.PI*2); g.fill(); }
+      else if(h<0.26){ g.strokeStyle=P.grass[1]; g.lineWidth=Math.max(1,T*0.03); const bx=x+T*(0.25+hrand(r,c,94)*0.5), by=y+T*(0.45+hrand(r,c,96)*0.35);
+        g.beginPath(); for(let i=-1;i<=1;i++){ g.moveTo(bx+i*T*0.04,by); g.lineTo(bx+i*T*0.07,by-T*0.12); } g.stroke(); }
     }
   }
-  // лёгкая сетка — чтобы было видно, куда нажимать
-  g.strokeStyle='rgba(0,0,0,0.08)'; g.lineWidth=1; g.beginPath();
-  for(let i=1;i<VIEW_COLS;i++){ g.moveTo(i*T+0.5,0); g.lineTo(i*T+0.5,H); } for(let i=1;i<VIEW_ROWS;i++){ g.moveTo(0,i*T+0.5); g.lineTo(W,i*T+0.5); } g.stroke();
-  // слой 5–6: подсветка и значки
+  // 4: дороги — 4-битная маска; два прохода (обочина, потом полотно), чтобы стыки не оставляли тёмных швов;
+  //    блок 2×2 из дорог заливается целиком — параллельные дороги не превращаются в «лестницу»
+  const roadW=T*0.5, ro=(T-roadW)/2;
+  [[P.road[1],0],[P.road[0],T*0.07]].forEach(([col,inset])=>{
+    g.fillStyle=col;
+    roadCells.forEach(([r,c,x,y])=>{
+      const m=(isRoadNode(r-1,c)?1:0)|(isRoadNode(r,c+1)?2:0)|(isRoadNode(r+1,c)?4:0)|(isRoadNode(r,c-1)?8:0);
+      g.beginPath(); g.arc(x+T/2,y+T/2,roadW/2-inset,0,Math.PI*2); g.fill();
+      [[1,x+ro,y,roadW,T/2+roadW/2],[2,x+T/2-roadW/2,y+ro,T/2+roadW/2,roadW],[4,x+ro,y+T/2-roadW/2,roadW,T/2+roadW/2],[8,x,y+ro,T/2+roadW/2,roadW]].forEach(([bit,sx,sy,sw,sh])=>{
+        if(m&bit){ const ix=(bit===1||bit===4)?inset:0, iy=(bit===2||bit===8)?inset:0; g.fillRect(sx+ix,sy+iy,sw-2*ix,sh-2*iy); } });
+      if(isRoadNode(r,c+1)&&isRoadNode(r+1,c)&&isRoadNode(r+1,c+1)) g.fillRect(x+T/2-roadW/2+inset,y+T/2-roadW/2+inset,T+roadW-2*inset,T+roadW-2*inset);
+    });
+  });
+  g.fillStyle='rgba(0,0,0,0.08)';
+  roadCells.forEach(([r,c,x,y])=>{ if(hash2(r,c,77)%3===0){ g.beginPath(); g.arc(x+T*(0.4+hrand(r,c,78)*0.2),y+T*(0.4+hrand(r,c,79)*0.2),T*0.04,0,Math.PI*2); g.fill(); } });
+  // 6: лес и горы — общий список, сортировка по нижней точке; захватываем и клетки за краем, чтобы кроны не обрезались
+  const objs=[];
+  for(let r=R0-1;r<R0+nR+1;r++) for(let c=C0-1;c<C0+nC+1;c++){
+    const t=terrAt(r,c); if(t!=='f'&&t!=='m') continue;
+    const x=X(c), y=Y(r), same=d=>terrAt(r+DIRS8G[d][0],c+DIRS8G[d][1])===t;
+    const k=Object.keys(DIRS8G).filter(same).length;
+    const bx=(same('E')?1:0)-(same('W')?1:0), by=(same('S')?1:0)-(same('N')?1:0);
+    if(t==='f'){
+      const n=Math.min(5,2+Math.round(k/2.2)), big=k>=6;
+      for(let i=0;i<n;i++){
+        const tx=x+T*(0.5+(hrand(r,c,10+i)-0.5)*0.62+bx*0.08), ty=y+T*(0.5+(hrand(r,c,20+i)-0.5)*0.6+by*0.08);
+        objs.push({kind:'tree',x:tx,y:ty,r:T*((big?0.22:0.18)+hrand(r,c,30+i)*0.08)});
+      }
+    } else {
+      // горы — плато с обрывом (как в JRPG): ярус 1 у каждой горной клетки, ярус 2 — где гора со всех 8 сторон
+      objs.push({kind:'cliff',r,c,x,y,lvl:1,sortY:y+T});
+      if(isMtnL2(r,c)) objs.push({kind:'cliff',r,c,x,y,lvl:2,sortY:y+T+0.5});
+    }
+  }
+  objs.sort((a,b)=>(a.kind==='tree'?a.y+a.r:a.sortY)-(b.kind==='tree'?b.y+b.r:b.sortY)).forEach(o=>{
+    if(o.kind==='cliff'){ drawCliff(g,o,T,P); return; }
+    if(o.kind==='tree'){
+      const {x,y,r}=o;
+      g.fillStyle='rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(x+r*0.2,y+r*0.9,r*0.95,r*0.35,0,0,Math.PI*2); g.fill();
+      g.fillStyle=P.tree[0]; g.beginPath(); g.arc(x,y,r,0,Math.PI*2); g.fill();
+      g.fillStyle=P.tree[1]; g.beginPath(); g.arc(x-r*0.15,y-r*0.15,r*0.75,0,Math.PI*2); g.fill();
+      g.fillStyle=P.tree[2]; g.beginPath(); g.arc(x-r*0.3,y-r*0.32,r*0.35,0,Math.PI*2); g.fill();
+      if(curCont===2){ g.fillStyle='rgba(255,255,255,0.85)'; g.beginPath(); g.arc(x-r*0.2,y-r*0.45,r*0.27,0,Math.PI*2); g.fill(); }
+    } else {
+      const {x,y,h,w,px}=o, py=y-h;
+      g.fillStyle='rgba(0,0,0,0.22)'; g.beginPath(); g.ellipse(x+w*0.2,y,w*1.05,w*0.22,0,0,Math.PI*2); g.fill();
+      g.fillStyle=P.peak[0]; g.beginPath(); g.moveTo(x-w,y); g.lineTo(px,py); g.lineTo(x+w,y); g.closePath(); g.fill();
+      g.fillStyle=P.peak[1]; g.beginPath(); g.moveTo(x-w,y); g.lineTo(px,py); g.lineTo(px+w*0.12,y); g.closePath(); g.fill();
+      if(P.peak[2]){ g.fillStyle=P.peak[2]; g.beginPath(); g.moveTo(px,py); g.lineTo(px-w*0.28,py+h*0.28); g.lineTo(px+w*0.28,py+h*0.28); g.closePath(); g.fill(); }
+    }
+  });
+  // 7: значки (героя — по желанию: в анимации он рисуется отдельно)
   const fs=Math.round(T*0.64);
   g.textAlign='center'; g.textBaseline='middle'; g.font=`${fs}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  for(let r=R0;r<R0+nR;r++) for(let c=C0;c<C0+nC;c++){
+    if(!opts.hero && r===hero.row && c===hero.col) continue;
+    const icon=tileIcon(r,c); if(!icon) continue;
+    drawIcon(g,icon,X(c),Y(r),T);
+  }
+}
+function isMtn(r,c){ return terrAt(r,c)==='m'; }
+function isMtnL2(r,c){ if(!isMtn(r,c)) return false; for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++) if(!isMtn(r+dr,c+dc)) return false; return true; }
+function pathRoundRect(g,x,y,w,h,rad){ // rad=[tl,tr,br,bl]
+  const [tl,tr,br,bl]=rad; g.beginPath(); g.moveTo(x+tl,y); g.lineTo(x+w-tr,y); if(tr) g.arcTo(x+w,y,x+w,y+tr,tr); else g.lineTo(x+w,y);
+  g.lineTo(x+w,y+h-br); if(br) g.arcTo(x+w,y+h,x+w-br,y+h,br); else g.lineTo(x+w,y+h);
+  g.lineTo(x+bl,y+h); if(bl) g.arcTo(x,y+h,x,y+h-bl,bl); else g.lineTo(x,y+h);
+  g.lineTo(x,y+tl); if(tl) g.arcTo(x,y,x+tl,y,tl); else g.lineTo(x,y); g.closePath();
+}
+/* Плато с обрывом (JRPG). Открытые стороны (сосед — не гора этого яруса) отступают внутрь; с юга — высокая стена из
+   каменных столбов, темнеющая к подножию, с осыпью и тенью на земле; внешние углы скруглены; светлая кромка по северу.
+   Ярус 2 (гора со всех 8 сторон) — вторая ступень повыше, чтобы массив читался объёмным. Верх — камень с мхом
+   (снег в Хрустальном Бору, пепел с угольками на Пепелище). */
+const MOSS=['rgba(80,120,50,0.55)','rgba(140,130,60,0.5)',null,'rgba(40,30,25,0.5)','rgba(60,80,55,0.55)'];
+function drawCliff(g,o,T,P){
+  const {r,c,x,y,lvl}=o, same=(dr,dc)=>lvl===1?isMtn(r+dr,c+dc):isMtnL2(r+dr,c+dc);
+  const N=same(-1,0),S=same(1,0),W=same(0,-1),E=same(0,1);
+  const ins=lvl===1?T*0.05:T*0.13, face=lvl===1?T*0.5:T*0.36, rr=T*0.22;
+  const floor=lvl===1?y+T:y+T-T*0.06;
+  const x0=x+(W?0:ins), x1=x+T-(E?0:ins), y0=y+(N?0:ins)-(lvl===2?T*0.18:0);
+  const topBottom=S?(lvl===1?y+T:y+T-T*0.18):floor-face;
+  const snow=curCont===2;
+  const topCol=snow?P.peak[2]:(lvl===2?P.rock[2]:P.peak[1]);
+  const lift=(curCont===3||curCont===4)?(lvl===2?0.16:0.10):0; // на тёмных землях верх плато чуть светлее, чтобы массив отделялся от земли
+  // тень у подножия и осыпь
+  if(!S){
+    g.fillStyle='rgba(0,0,0,0.28)'; pathRoundRect(g,x0+T*0.04,floor-T*0.03,x1-x0,T*0.14,[0,0,T*0.07,T*0.07]); g.fill();
+    if(lvl===1) for(let i=0;i<3;i++){ const bx=x0+(x1-x0)*hrand(r,c,400+i), by=floor+T*(0.01+hrand(r,c,410+i)*0.05), br=T*(0.03+hrand(r,c,420+i)*0.03);
+      g.fillStyle=P.peak[0]; g.beginPath(); g.ellipse(bx,by,br*1.3,br,0,0,Math.PI*2); g.fill(); g.fillStyle=P.peak[1]; g.beginPath(); g.ellipse(bx-br*0.3,by-br*0.3,br*0.6,br*0.45,0,0,Math.PI*2); g.fill(); }
+  }
+  // стена: каменные столбы разной ширины, светлые грани и тёмные стыки, затемнение книзу
+  if(!S){
+    const bl=!W?rr*0.55:0, br=!E?rr*0.55:0;
+    g.save(); pathRoundRect(g,x0,topBottom-1,x1-x0,floor-topBottom+1,[0,0,br,bl]); g.clip();
+    g.fillStyle=P.peak[0]; g.fillRect(x0,topBottom-1,x1-x0,floor-topBottom+1);
+    let cx=x0-T*0.05*hrand(r,c,430+lvl), i=0;
+    while(cx<x1 && i<8){ const w=T*(0.14+hrand(r,c,440+i+lvl*9)*0.12), dip=face*hrand(r,c,450+i)*0.12;
+      g.fillStyle=(i%2)?'rgba(255,255,255,0.10)':'rgba(0,0,0,0.10)'; g.fillRect(cx,topBottom+dip,w,face);
+      g.fillStyle='rgba(255,255,255,0.16)'; g.fillRect(cx,topBottom+dip,Math.max(1,T*0.02),face);
+      g.fillStyle='rgba(0,0,0,0.30)'; g.fillRect(cx+w-Math.max(1,T*0.02),topBottom+dip,Math.max(1,T*0.02),face);
+      cx+=w; i++; }
+    const gr=g.createLinearGradient(0,topBottom,0,floor); gr.addColorStop(0,'rgba(0,0,0,0)'); gr.addColorStop(1,'rgba(0,0,0,0.45)'); g.fillStyle=gr; g.fillRect(x0,topBottom-1,x1-x0,floor-topBottom+1);
+    if(curCont===3&&hash2(r,c,460)%3===0){ g.strokeStyle='rgba(255,100,30,0.8)'; g.lineWidth=Math.max(1,T*0.03); const sx=x0+(x1-x0)*(0.3+hrand(r,c,461)*0.4); g.beginPath(); g.moveTo(sx,topBottom+2); g.lineTo(sx-T*0.04,topBottom+face*0.45); g.lineTo(sx+T*0.03,floor-2); g.stroke(); }
+    g.restore();
+    g.strokeStyle='rgba(0,0,0,0.4)'; g.lineWidth=1; pathRoundRect(g,x0,topBottom-1,x1-x0,floor-topBottom+1,[0,0,br,bl]); g.stroke();
+  }
+  // верх плато
+  const tl=(!N&&!W)?rr:0, tr=(!N&&!E)?rr:0;
+  pathRoundRect(g,x0,y0,x1-x0,topBottom-y0,[tl,tr,0,0]);
+  g.fillStyle=topCol; g.fill();
+  if(lift){ g.fillStyle=`rgba(255,255,255,${lift})`; g.fill(); }
+  g.save(); g.clip();
+  for(let i=0;i<4;i++){ g.fillStyle=snow?'rgba(150,180,200,0.22)':'rgba(0,0,0,0.09)'; g.beginPath(); g.ellipse(x+T*(0.12+hrand(r,c,340+i+lvl)*0.76),y+T*(0.12+hrand(r,c,350+i)*0.6),T*(0.06+hrand(r,c,360+i)*0.08),T*0.04,0,0,Math.PI*2); g.fill(); }
+  const moss=MOSS[curCont];
+  if(moss){ for(let i=0;i<2;i++) if(hash2(r,c,500+i+lvl)%3!==0){ g.fillStyle=moss; g.beginPath(); g.ellipse(x+T*(0.2+hrand(r,c,510+i)*0.6),y+T*(0.2+hrand(r,c,520+i)*0.45),T*(0.1+hrand(r,c,530+i)*0.1),T*(0.06+hrand(r,c,540+i)*0.05),0,0,Math.PI*2); g.fill(); } }
+  if(curCont===3&&hash2(r,c,550)%3===0){ for(let i=0;i<3;i++){ g.fillStyle='rgba(255,120,40,0.85)'; g.beginPath(); g.arc(x+T*(0.2+hrand(r,c,560+i)*0.6),y+T*(0.2+hrand(r,c,570+i)*0.4),Math.max(1,T*0.025),0,Math.PI*2); g.fill(); } }
+  if(hash2(r,c,370+lvl)%4===0){ const bx=x+T*(0.3+hrand(r,c,371)*0.4), by=y+T*(0.25+hrand(r,c,372)*0.3);
+    g.fillStyle='rgba(0,0,0,0.22)'; g.beginPath(); g.ellipse(bx+1,by+T*0.05,T*0.08,T*0.035,0,0,Math.PI*2); g.fill();
+    g.fillStyle=P.peak[0]; g.beginPath(); g.ellipse(bx,by,T*0.07,T*0.055,0,0,Math.PI*2); g.fill();
+    g.fillStyle=snow?'#ffffff':P.rock[2]; g.beginPath(); g.ellipse(bx-T*0.015,by-T*0.015,T*0.035,T*0.025,0,0,Math.PI*2); g.fill(); }
+  g.restore();
+  // кромка: светлая по северу, лёгкая тень по востоку
+  if(!N){ g.strokeStyle='rgba(255,255,255,0.4)'; g.lineWidth=Math.max(1,T*0.045); g.beginPath(); g.moveTo(x0+tl,y0+1); g.lineTo(x1-tr,y0+1); g.stroke(); }
+  if(!E){ g.strokeStyle='rgba(0,0,0,0.22)'; g.lineWidth=Math.max(1,T*0.04); g.beginPath(); g.moveTo(x1-1,y0+tr); g.lineTo(x1-1,topBottom); g.stroke(); }
+  if(!W){ g.strokeStyle='rgba(255,255,255,0.15)'; g.lineWidth=Math.max(1,T*0.03); g.beginPath(); g.moveTo(x0+1,y0+tl); g.lineTo(x0+1,topBottom); g.stroke(); }
+}
+function drawIcon(g,icon,x,y,T){
+  g.fillStyle='rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(x+T/2,y+T*0.82,T*0.3,T*0.1,0,0,Math.PI*2); g.fill();
+  // Chrome применяет прозрачность кисти даже к цветным эмодзи — значок рисуем непрозрачной кистью
+  g.fillStyle='#000'; g.fillText(icon,x+T/2,y+T*0.5);
+}
+function drawAtmosphere(g,W,H){
+  const P=pal();
+  if(P.tint){ g.fillStyle=P.tint; g.fillRect(0,0,W,H); }
+  const v=g.createRadialGradient(W/2,H/2,Math.min(W,H)*0.35,W/2,H/2,Math.max(W,H)*0.75);
+  v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,'rgba(0,0,0,0.28)'); g.fillStyle=v; g.fillRect(0,0,W,H);
+}
+function mapCanvasEl(W,H,dpr){
+  const mapEl=document.getElementById('map');
+  let cv=mapEl.querySelector('canvas');
+  if(!cv){ mapEl.innerHTML=''; cv=document.createElement('canvas'); mapEl.appendChild(cv);
+    cv.addEventListener('click',e=>{ if(walkAnim) return; const b=cv.getBoundingClientRect(); const c=Math.floor((e.clientX-b.left)/(b.width/VIEW_COLS)), r=Math.floor((e.clientY-b.top)/(b.height/VIEW_ROWS));
+      if(r>=0&&r<VIEW_ROWS&&c>=0&&c<VIEW_COLS) tileClick(camRowG+r,camColG+c); }); }
+  if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){ cv.width=Math.round(W*dpr); cv.height=Math.round(H*dpr); cv.style.width=W+'px'; cv.style.height=H+'px'; }
+  return cv;
+}
+function drawMapCanvas(dist,camRow,camCol){
+  if(walkAnim) return; // идёт шаг — кадры рисует анимация
+  const T=TILE_PX, W=VIEW_COLS*T, H=VIEW_ROWS*T, dpr=Math.min(3,window.devicePixelRatio||1);
+  const cv=mapCanvasEl(W,H,dpr); ensureGfxCache(T,dpr);
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  drawWorld(g,T,dpr,camRow,camCol,VIEW_ROWS,VIEW_COLS,{hero:true});
+  // сетка, подсветка
+  g.strokeStyle='rgba(0,0,0,0.07)'; g.lineWidth=1; g.beginPath();
+  for(let i=1;i<VIEW_COLS;i++){ g.moveTo(i*T+0.5,0); g.lineTo(i*T+0.5,H); } for(let i=1;i<VIEW_ROWS;i++){ g.moveTo(0,i*T+0.5); g.lineTo(W,i*T+0.5); } g.stroke();
   for(let rr=0;rr<VIEW_ROWS;rr++) for(let cc=0;cc<VIEW_COLS;cc++){
     const r=camRow+rr, c=camCol+cc, x=cc*T, y=rr*T, t=terrAt(r,c);
     const reach=dist[key(r,c)]!==undefined && !(r===hero.row&&c===hero.col);
     const canModify=!reach && adjacent(r,c) && (t==='f'||t==='w'||t==='m');
-    if(reach||canModify){
-      g.fillStyle=reach?'rgba(150,255,140,0.13)':'rgba(255,210,80,0.12)'; g.fillRect(x+1,y+1,T-2,T-2);
-      g.strokeStyle=reach?'rgba(170,255,150,0.75)':'rgba(255,205,70,0.95)'; g.lineWidth=Math.max(1.5,T*0.06);
-      const i=g.lineWidth/2+1; g.strokeRect(x+i,y+i,T-2*i,T-2*i);
-    }
-    const icon=tileIcon(r,c);
-    if(icon){
-      g.fillStyle='rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(x+T/2,y+T*0.8,T*0.3,T*0.1,0,0,Math.PI*2); g.fill();
-      g.fillText(icon,x+T/2,y+T*0.5);
-    }
+    if(!reach&&!canModify) continue;
+    g.fillStyle=reach?'rgba(170,255,150,0.10)':'rgba(255,210,80,0.12)'; g.fillRect(x+1,y+1,T-2,T-2);
+    g.strokeStyle=reach?'rgba(190,255,170,0.5)':'rgba(255,205,70,0.9)'; g.lineWidth=Math.max(1.2,T*(reach?0.04:0.055));
+    const i=g.lineWidth/2+1; g.strokeRect(x+i,y+i,T-2*i,T-2*i);
   }
+  drawAtmosphere(g,W,H);
+}
+
+/* ---------- анимация шага ---------- */
+let walkAnim=null;
+const REDUCED_MOTION=(()=>{ try{ return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(e){ return false; } })();
+function camFor(r,c){ return {r:Math.max(0,Math.min(ROWS-VIEW_ROWS,r-Math.floor(VIEW_ROWS/2))), c:Math.max(0,Math.min(COLS-VIEW_COLS,c-Math.floor(VIEW_COLS/2)))}; }
+function startHeroWalk(path,done){
+  if(gfxMode!=='new'||REDUCED_MOTION||path.length<2||view!=='map'){ done(); return; }
+  const T=TILE_PX, dpr=Math.min(2,window.devicePixelRatio||1);
+  ensureGfxCache(T,dpr);
+  const cams=path.map(p=>camFor(p.r,p.c));
+  const R0=Math.min(...cams.map(k=>k.r)), C0=Math.min(...cams.map(k=>k.c));
+  const nR=Math.max(...cams.map(k=>k.r))-R0+VIEW_ROWS, nC=Math.max(...cams.map(k=>k.c))-C0+VIEW_COLS;
+  const off=document.createElement('canvas'); off.width=Math.ceil(nC*T*dpr); off.height=Math.ceil(nR*T*dpr);
+  const og=off.getContext('2d'); og.setTransform(dpr,0,0,dpr,0,0);
+  drawWorld(og,T,dpr,R0,C0,nR,nC,{hero:false});
+  const stepMs=Math.max(55,Math.min(110,900/(path.length-1)));
+  walkAnim={path,off,R0,C0,dpr,stepMs,t0:performance.now(),done};
+  requestAnimationFrame(walkFrame);
+}
+function walkFrame(now){
+  const a=walkAnim; if(!a) return;
+  const T=TILE_PX, W=VIEW_COLS*T, H=VIEW_ROWS*T, screenDpr=Math.min(3,window.devicePixelRatio||1);
+  const prog=Math.max(0,Math.min(a.path.length-1,(now-a.t0)/a.stepMs)), i=Math.floor(prog), f=prog-i;
+  const p0=a.path[i], p1=a.path[Math.min(i+1,a.path.length-1)], e=f<0.5?2*f*f:1-2*(1-f)*(1-f);
+  const hr=p0.r+(p1.r-p0.r)*e, hc=p0.c+(p1.c-p0.c)*e;
+  const camR=Math.max(0,Math.min(ROWS-VIEW_ROWS,hr-Math.floor(VIEW_ROWS/2))), camC=Math.max(0,Math.min(COLS-VIEW_COLS,hc-Math.floor(VIEW_COLS/2)));
+  const cv=mapCanvasEl(W,H,screenDpr), g=cv.getContext('2d');
+  g.setTransform(screenDpr,0,0,screenDpr,0,0); g.clearRect(0,0,W,H);
+  g.drawImage(a.off,(camC-a.C0)*T*a.dpr,(camR-a.R0)*T*a.dpr,W*a.dpr,H*a.dpr,0,0,W,H);
+  const fs=Math.round(T*0.64); g.textAlign='center'; g.textBaseline='middle'; g.font=`${fs}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  const onWater=terrAt(Math.round(hr),Math.round(hc))==='w';
+  const bob=onWater?Math.sin(prog*Math.PI*2)*T*0.025:-Math.abs(Math.sin(f*Math.PI))*T*0.08;
+  drawIcon(g,onWater?'⛵':heroEmoji(),(hc-camC)*T,(hr-camR)*T+bob,T);
+  drawAtmosphere(g,W,H);
+  if(prog>=a.path.length-1){ walkAnim=null; const done=a.done; renderMap(); done(); return; }
+  requestAnimationFrame(walkFrame);
+}
+/* Путь героя по карте Дейкстры: от цели назад к герою. Возвращает клетки от старта до цели. */
+function heroPath(dist,r,c){
+  const out=[{r,c}]; let cr=r, cc=c, guard=0;
+  const cost=(rr,cc2)=>tch(rr,cc2)==='w'?(onShip?2:Infinity):TERRAIN[tch(rr,cc2)].cost;
+  while(!(cr===hero.row&&cc===hero.col) && guard++<400){
+    const here=dist[key(cr,cc)], step=cost(cr,cc); let moved=false;
+    for(const [nr,nc] of [[cr-1,cc],[cr+1,cc],[cr,cc-1],[cr,cc+1]]){
+      const d=dist[key(nr,nc)];
+      if(d!==undefined && d+step===here){ cr=nr; cc=nc; out.push({r:cr,c:cc}); moved=true; break; }
+    }
+    if(!moved) break;
+  }
+  return out.reverse();
 }
 
 /* ================= WIRING ================= */
@@ -2121,6 +2434,7 @@ document.getElementById('retreatBtn').onclick=()=>{
   if(!cur||cur.side!=='player') return;
   battleOver=true; syncArmyFromBattle();
   stats.retreats++; battleCasualties();
+  track('battle',{res:'retreat',kind:curEncounter&&curEncounter.type,pow:lastBattleEnemyPower});
   bLog('🏳️ Отряд отступает с поля боя!'); renderBattle();
   setTimeout(()=>{ showView('map'); renderMap(); setInfo('🏳️ Вы отступили без потерь армии, но без трофеев.'); },1000);
 };
@@ -2165,7 +2479,7 @@ function openMenu(){
   const inBattle=view==='battle';
   ['saveBtn','loadBtn','statsBtn','restartBtn'].forEach(id=>document.getElementById(id).disabled=inBattle);
 }
-document.getElementById('menuBtn').onclick=()=>{ document.getElementById('gfxBtn').textContent=`🎨 Графика: ${gfxMode==='new'?'новая':'классическая'}`; openMenu(); };
+document.getElementById('menuBtn').onclick=()=>{ syncTipsBtn(); document.getElementById('gfxBtn').textContent=`🎨 Графика: ${gfxMode==='new'?'новая':'классическая'}`; openMenu(); };
 document.getElementById('gfxBtn').onclick=()=>{ setGfxMode(gfxMode==='new'?'old':'new'); document.getElementById('gfxBtn').textContent=`🎨 Графика: ${gfxMode==='new'?'новая':'классическая'}`; };
 document.getElementById('hudMoreBtn').onclick=()=>{
   const m=document.getElementById('hudMore'), open=m.classList.toggle('hidden');
@@ -2260,22 +2574,123 @@ function contactDev(){
   if(tg&&tg.initData&&tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url,'_blank');
 }
 document.getElementById('bugBtn').onclick=()=>{ closeModal(); openBugReport(); };
+/* ================= ПОДСКАЗКИ ДЛЯ НОВИЧКА =================
+   Каждая показывается один раз — в момент, когда механика встречается впервые. Не останавливает игру,
+   одновременно видна одна (остальные ждут в очереди). Что уже показано, хранится отдельно от партии:
+   новая игра не повторяет подсказок. Выключить и показать заново — в меню. */
+const TIPS={
+  move:'Нажмите на клетку в <b>зелёной рамке</b> — туда герой дойдёт сегодня. На день есть ограниченное число ходов (👣), болото и пустыня отнимают больше.',
+  day:'Ходы на сегодня кончились — нажмите <b>⏭️ День</b>. Каждое утро игра сохраняется сама.',
+  workers:'Лес, скалы и воду убирают <b>работники</b>: 🪓 Лесоруб, ⛏️ Камнетёс, 🔨 Плотник. Нанимают их в гильдиях некоторых городов.',
+  city:'В городе можно <b>нанять войска</b>. Размер армии ограничен <b>лидерством</b> 👥. В разных городах продаётся разное — всё увиденное записывается в 📖 Справочник (меню ☰).',
+  battle:'<b>Бой.</b> Отряд, чей ход, подсвечен. Нажмите на клетку, чтобы пойти, или на врага в красной рамке, чтобы ударить. Стрелки бьют издалека. Можно «Ждать» или «Отступить».',
+  defeat:'Поражение: армия отступила в столицу и ослабла. В обычном режиме неудачу можно переиграть — меню ☰ → «Загрузить».',
+  week:'Прошла неделя: города и ваши замки приносят <b>доход</b>, а армия требует <b>содержания</b>. Следите, чтобы казна не опустела.',
+  castle:'Это <b>вражеский замок</b> 🏴. Захват даёт часть карты земли; все 8 частей открывают путь в следующую землю. Перед штурмом прикиньте силу гарнизона.',
+  leadership:'Не хватает <b>лидерства</b>. Его дают уровни героя, звания за захваченные замки, шлемы и ритуальные предметы.',
+  sorcerer:'Это 🌑 <b>Чёрный Колдун</b>. Если догонит — что-нибудь отнимет. Он ходит только по проходимой земле: от него можно укрыться за лесом или изгнать заклинанием «Смерч».',
+  minimap:'Кнопка <b>🧭</b> вверху открывает карту всей земли: города, замки, пристани и где вы сейчас.',
+};
+const TIPS_KEY='morveyn_tips_seen', TIPS_ON_KEY='morveyn_tips_on';
+let tipsSeen=(()=>{ try{ return JSON.parse(localStorage.getItem(TIPS_KEY)||'{}'); }catch(e){ return {}; } })();
+let tipsOn=(()=>{ try{ return localStorage.getItem(TIPS_ON_KEY)!=='0'; }catch(e){ return true; } })();
+let tipQueue=[], tipShowing=null;
+function saveTips(){ try{ localStorage.setItem(TIPS_KEY,JSON.stringify(tipsSeen)); localStorage.setItem(TIPS_ON_KEY,tipsOn?'1':'0'); }catch(e){} }
+function showTip(id){
+  if(!tipsOn||!booted||tipsSeen[id]||!TIPS[id]||tipShowing===id||tipQueue.includes(id)) return;
+  tipQueue.push(id); pumpTips();
+}
+function pumpTips(){
+  if(tipShowing||!tipQueue.length) return;
+  const id=tipQueue.shift(); tipShowing=id; tipsSeen[id]=true; saveTips();
+  document.getElementById('tipText').innerHTML=TIPS[id];
+  const box=document.getElementById('tipBox'); box.classList.remove('hidden'); placeTip();
+  track('tip',{id});
+}
+/* Подсказка встаёт над нижними кнопками, не закрывая их (в бою — над журналом). */
+function placeTip(){
+  const box=document.getElementById('tipBox'); if(box.classList.contains('hidden')) return;
+  const ctr=document.getElementById('controls'), log=document.getElementById('log');
+  const anchor=(view==='battle'&&log)?log:ctr;
+  const top=anchor&&anchor.offsetParent!==null?anchor.getBoundingClientRect().top:window.innerHeight;
+  box.style.bottom=Math.max(8,window.innerHeight-top+8)+'px';
+}
+window.addEventListener('resize',()=>setTimeout(placeTip,150));
+function closeTip(){ document.getElementById('tipBox').classList.add('hidden'); tipShowing=null; setTimeout(pumpTips,250); }
+document.getElementById('tipOk').onclick=closeTip;
+function syncTipsBtn(){ document.getElementById('tipsBtn').textContent=`💡 Подсказки: ${tipsOn?'вкл':'выкл'}`; }
+document.getElementById('tipsBtn').onclick=()=>{ tipsOn=!tipsOn; saveTips(); syncTipsBtn(); if(!tipsOn){ tipQueue=[]; if(tipShowing) closeTip(); } };
+document.getElementById('tipsResetBtn').onclick=()=>{ tipsSeen={}; tipsOn=true; saveTips(); syncTipsBtn(); closeModal(); showTip('move'); };
+/* Проверки «что видно на экране»: замок и Колдун. Вызывается после каждой отрисовки карты. */
+function checkVisibleTips(){
+  if(!tipsOn||view!=='map') return;
+  const inView=(r,c)=>r>=camRowG&&r<camRowG+VIEW_ROWS&&c>=camColG&&c<camColG+VIEW_COLS;
+  if(!tipsSeen.castle && pois.some(p=>(p.type==='castle'||p.type==='governor')&&p.owner!=='player'&&inView(p.r,p.c))) showTip('castle');
+  if(!tipsSeen.sorcerer && sorcerer&&sorcerer.active&&inView(sorcerer.r,sorcerer.c)) showTip('sorcerer');
+}
+
+/* ================= МИНИ-КАРТА =================
+   Вся земля 80×60 одной картинкой: рельеф по палитре земли, поверх — города, замки, пристани, пирамиды,
+   корабль и герой; рамкой — то, что видно на экране сейчас. */
+function openMinimap(){
+  if(view==='battle') return;
+  const P=pal(), sc=6, cv=document.createElement('canvas'); cv.width=COLS*sc; cv.height=ROWS*sc; cv.id='miniCanvas';
+  const g=cv.getContext('2d');
+  const col={g:P.grass[0],d:P.sand[0],s:P.swamp[0],w:P.water[0],f:P.tree[1],m:P.peak[1],r:P.road[0]};
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ g.fillStyle=col[terrainGrid[r][c]]||P.grass[0]; g.fillRect(c*sc,r*sc,sc,sc); }
+  g.strokeStyle='rgba(255,255,255,0.9)'; g.lineWidth=2; g.strokeRect(camColG*sc+1,camRowG*sc+1,VIEW_COLS*sc-2,VIEW_ROWS*sc-2);
+  const dot=(r,c,fill,size)=>{ const z=size*sc; g.fillStyle='rgba(0,0,0,0.6)'; g.fillRect(c*sc+sc/2-z/2-1,r*sc+sc/2-z/2-1,z+2,z+2); g.fillStyle=fill; g.fillRect(c*sc+sc/2-z/2,r*sc+sc/2-z/2,z,z); };
+  pois.forEach(p=>{
+    if(p.type==='city') dot(p.r,p.c,'#ffd34d',1.6);
+    else if(p.type==='castle'||p.type==='governor') dot(p.r,p.c,p.owner==='player'?'#4da3ff':'#e5484d',1.6);
+    else if(p.type==='port') dot(p.r,p.c,'#7fe0ff',1.2);
+    else if(p.type==='pyramid'&&poiAt(p.r,p.c)) dot(p.r,p.c,'#d9a3ff',1.3);
+  });
+  if(shipPos&&!onShip) dot(shipPos.r,shipPos.c,'#ffffff',1.1);
+  g.fillStyle='#ffffff'; g.beginPath(); g.arc(hero.col*sc+sc/2,hero.row*sc+sc/2,sc*1.3,0,Math.PI*2); g.fill();
+  g.fillStyle='#1b140d'; g.beginPath(); g.arc(hero.col*sc+sc/2,hero.row*sc+sc/2,sc*0.6,0,Math.PI*2); g.fill();
+  const enemyCastles=pois.filter(p=>(p.type==='castle'||p.type==='governor')&&p.owner!=='player').length;
+  openModal(`<h2>🧭 ${contCfg().emoji} ${contCfg().name}</h2>
+    <div class="modalNote">Непокорённых замков: <b>${enemyCastles}</b> · частей карты: <b>${mapPieces}/${TOTAL_PIECES}</b></div>
+    <div id="miniSlot"></div>
+    <div class="miniLegend"><span><i style="background:#ffffff"></i>вы</span><span><i style="background:#ffd34d"></i>город</span>
+      <span><i style="background:#e5484d"></i>вражеский замок</span><span><i style="background:#4da3ff"></i>ваш замок</span>
+      <span><i style="background:#7fe0ff"></i>пристань</span><span><i style="background:#d9a3ff"></i>пирамида</span><span>⬜ рамка — экран</span></div>
+    <button class="secondary" style="margin-top:12px;width:100%;" onclick="closeModal()">Закрыть</button>`);
+  document.getElementById('miniSlot').appendChild(cv);
+  track('minimap',{});
+}
+document.getElementById('miniBtn').onclick=openMinimap;
+
 const GAME_INTRO=`Пять земель по 80×60 клеток, каждая опаснее предыдущей. В каждой — 5 городов и 8 замков: покорите землю целиком, чтобы открыть путь к следующей. Между землями плавают из любой пристани — корабль плывёт с вами.`;
+let pendingHero='knight';
 function openNewGame(first){
+  const cards=['knight','sorceress','ranger'].map(k=>{ const h=HERO_CLASSES[k];
+    return `<button class="modeBtn secondary" onclick="chooseHero('${k}',${first})"><span style="font-size:22px;">${h.emoji}</span> ${h.name}, ${h.title}<small>${h.desc}</small></button>`; }).join('');
   openModal(`<h2>${first?'⚔️ Добро пожаловать в Морвейн':'🔄 Новая игра'}</h2>
     <div class="modalNote">${GAME_INTRO}</div>
     ${first?'':`<div class="modalNote" style="color:var(--bad);margin-top:8px;">Текущая партия и её сохранение будут стёрты.</div>`}
-    <div class="modalNote" style="margin-top:10px;color:var(--text);"><b>Выберите режим</b> — изменить его в этой партии будет нельзя:</div>
+    <div class="modalNote" style="margin-top:10px;color:var(--text);"><b>Выберите героя:</b></div>
+    ${cards}
+    ${first?'':`<button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Отмена</button>`}`, first);
+}
+function chooseHero(k,first){ pendingHero=k; openModeStep(first); }
+function openModeStep(first){
+  const h=HERO_CLASSES[pendingHero];
+  openModal(`<h2>${h.emoji} ${h.name}, ${h.title}</h2>
+    <div class="modalNote" style="margin-top:4px;color:var(--text);"><b>Выберите режим</b> — изменить его в этой партии будет нельзя:</div>
     <button class="modeBtn" onclick="beginGame(false,${first})">🛡️ Обычный<small>Автосохранение каждое утро, сохранение и загрузка в любой момент — неудачу можно переиграть.</small></button>
     <button class="modeBtn secondary" onclick="beginGame(true,${first})">⚔️ Жёсткий<small>Игра сохраняется после каждого действия, загрузок нет. Штурм замка без армии и гибель героя необратимы.</small></button>
-    ${first?'':`<button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Отмена</button>`}`, first);
+    <button class="secondary" style="margin-top:10px;width:100%;" onclick="openNewGame(${first})">← Другой герой</button>`, first);
 }
 function beginGame(hard,first){
   closeModal();
   if(first){
-    // мир уже сгенерирован при запуске — просто фиксируем режим
-    hardMode=hard; updateSaveButtons(); updateHud(); saveSoon(true);
-    setInfo(hard?'⚔️ Жёсткий режим: каждое действие окончательно. Удачи!':'🛡️ Обычный режим: игра сохраняется каждое утро, сохраниться можно и через меню ☰.');
+    // мир уже сгенерирован при запуске — фиксируем режим и героя
+    hardMode=hard; applyHeroClass(pendingHero); updateSaveButtons(); renderMap(); saveSoon(true);
+    const h=heroCls();
+    track('game_start',{hero:pendingHero,hard}); setTimeout(()=>showTip('move'),400);
+    setInfo(`${h.emoji} ${h.name} начинает поход. `+(hard?'⚔️ Жёсткий режим: каждое действие окончательно. Удачи!':'🛡️ Обычный режим: игра сохраняется каждое утро, сохраниться можно и через меню ☰.'));
   } else doRestart(hard);
 }
 document.getElementById('invBtn').onclick=openInventory;
@@ -2284,8 +2699,10 @@ document.getElementById('magicBtn').onclick=openAdventureMagic;
 document.getElementById('nextDayBtn').onclick=()=>{
   day++; movesLeft=MOVE_BUDGET+equipBonus('movesPerDay');
   let msg=`📅 День ${day}. Ходы восстановлены.`;
+  track('day',{gold,army:leadershipUsed()});
+  if(day===3) setTimeout(()=>showTip('minimap'),300);
   if((day-1)%7===0){
-    week++;
+    week++; setTimeout(()=>showTip('week'),300);
     const income=allPois().filter(p=>p.type==='city'||((p.type==='castle'||p.type==='governor')&&p.owner==='player')).reduce((s,p)=>s+(p.tax||0),0)+equipBonus('goldPerWeek')+governorWage;
     const upkeep=army.filter(a=>a.hp>0).reduce((s,a)=>s+Math.ceil(a.hp/UNITS[a.key].hp)*UNITS[a.key].upkeep,0);
     gold+=income-upkeep;
@@ -2309,11 +2726,13 @@ function doRestart(hard){
   ritualItems={cup:false,wand:false,dagger:false,pentacle:false}; ritualGranted=0; ritualSetDone=false;
   governorWage=0; heroMagicPower=5; quasiExpireWeek=0; quasiBonus=0;
   spellCharges={heal:0,fireball:0,haste:0,multiply:0,resurrect:0,infection:0,towngate:0,givearmy:0,quasi:0,tornado:0};
-  stats=freshStats(); lastGoldSeen=gold; gameOverReason='';
+  stats=freshStats(); gameOverReason='';
   clearManualSave();
+  applyHeroClass(pendingHero); lastGoldSeen=gold;
   startNewWorld();
   showView('map'); setInfo('Новый мир сгенерирован.'); renderMap();
   saveSoon(true); updateSaveButtons();
+  track('game_start',{hero:heroClass,hard:hardMode,restart:true}); setTimeout(()=>showTip('move'),400);
 }
 
 /* ================= SAVE / LOAD =================
@@ -2354,7 +2773,7 @@ function serializeGame(){
     hero, gold, day, week, movesLeft, hasShip, onShip, shipPos, lastWaterPos, bonusLeadership,
     heroLevel, heroExp, heroMagicPower, quasiExpireWeek, quasiBonus,
     equipment, inventory, army, spellCharges, workers, hardMode, gameOverPermanent, gameOverReason,
-    ritualItems, ritualGranted, ritualSetDone, governorWage, stats
+    ritualItems, ritualGranted, ritualSetDone, governorWage, stats, heroClass
   });
 }
 function restoreGame(json){
@@ -2374,6 +2793,7 @@ function restoreGame(json){
   ({hero,gold,day,week,movesLeft,hasShip,onShip,shipPos,lastWaterPos,bonusLeadership,heroLevel,heroExp,heroMagicPower,
     quasiExpireWeek,quasiBonus,equipment,inventory,army,spellCharges,workers,hardMode,gameOverPermanent,ritualItems,governorWage}=d);
   gameOverReason=d.gameOverReason||'';
+  heroClass=HERO_CLASSES[d.heroClass]?d.heroClass:'classic';
   // старые сохранения не знали о бонусах ритуальных предметов — выдаём положенное за уже найденные
   ritualGranted=typeof d.ritualGranted==='number'?d.ritualGranted:0; ritualSetDone=!!d.ritualSetDone;
   applyRitualBonuses();
@@ -2513,6 +2933,7 @@ function openStats(victory){
       </div>
       <div class="statSection">Герой и казна</div>
       <div class="statGrid">
+        ${cell(heroCls().emoji+' '+heroCls().name,heroCls().title)}
         ${cell(heroLevel,'уровень героя')}
         ${cell(currentRank().name,'звание')}
         ${cell(fmtNum(armyPow),'сила армии сейчас')}
@@ -2558,7 +2979,7 @@ document.getElementById('saveBtn').onclick=()=>{
   if(hardMode||view==='battle') return;
   closeModal();
   if(view!=='map'){ showView('map'); renderMap(); }
-  writeSave('manual');
+  writeSave('manual'); track('save',{});
   setInfo(`💾 Игра сохранена (день ${day}). Утреннее автосохранение эту запись не затрёт.`);
 };
 document.getElementById('loadBtn').onclick=()=>{
@@ -2591,7 +3012,7 @@ async function openLoadDialog(){
 function loadSlot(slot){
   const str=loadCache[slot];
   if(!str||!restoreGame(str)){ openModal(`<h2>📂 Загрузка</h2><div class="modalNote">Не удалось прочитать сохранение.</div><button class="secondary" style="margin-top:10px;width:100%;" onclick="closeModal()">Закрыть</button>`); return; }
-  closeModal();
+  closeModal(); track('load',{slot});
   curCity=null; curEncounter=null; currentWallBonus=0;
   lastSavedPrint=progressPrint(); syncClosingGuard();
   showView('map'); renderMap(); updateSaveButtons();
@@ -2599,6 +3020,7 @@ function loadSlot(slot){
 }
 
 async function bootGame(){
+  track('session_start',{screen:`${innerWidth}x${innerHeight}`,lang:navigator.language,returning:!!localStorage.getItem(SAVE_KEY)});
   showView('map'); layoutViewport();
   setInfo('⏳ Загрузка сохранения...');
   const cands=await readBestSave();
