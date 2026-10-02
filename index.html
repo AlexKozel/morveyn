@@ -256,6 +256,7 @@
     <button id="saveBtn" class="secondary">💾 Сохранить игру</button>
     <button id="loadBtn" class="secondary">📂 Загрузить последнее сохранение</button>
     <button id="statsBtn" class="secondary">📊 Летопись похода</button>
+    <button id="inviteBtn" class="secondary">👥 Пригласить друга</button>
     <button id="achBtn" class="secondary">🏅 Достижения</button>
     <button id="challengeBtn" class="secondary">🏆 Испытание недели</button>
     <button id="questLogBtn" class="secondary">📜 Поручения</button>
@@ -273,7 +274,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.25.1', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.26.0', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -3948,6 +3949,7 @@ function openJournal(tab){
 document.getElementById('journalBtn').onclick=()=>{ closeModal(); openJournal(); };
 document.getElementById('questLogBtn').onclick=()=>{ closeModal(); openQuestLog(); };
 document.getElementById('challengeBtn').onclick=()=>{ closeModal(); openChallengeHub(); };
+document.getElementById('inviteBtn').onclick=()=>{ closeModal(); openInvite(); };
 document.getElementById('achBtn').onclick=()=>{ closeModal(); achSyncRun(); openAchievements(); };
 document.getElementById('pathBtn').onclick=()=>{ closeModal(); openPieces(false); };
 function bugReportText(){
@@ -4470,6 +4472,8 @@ const ACH=[
   {id:'legend_1',g:'👑 Сокровища и армия',e:'⚜️',n:'Реликвия',d:'Добыть легендарный артефакт',c:p=>(p.legends||0)>=1},
   {id:'legend_5',g:'👑 Сокровища и армия',e:'✦',n:'Хранитель реликвий',d:'Собрать все пять легендарных артефактов',goal:5,v:p=>p.legends||0,title:'Хранитель реликвий'},
   {id:'army_300',g:'👑 Сокровища и армия',e:'🚩',n:'Полководец',d:'Вести армию на 300 лидерства без превышения',goal:300,v:p=>p.maxLead||0,title:'Полководец'},
+  {id:'friend_1',g:'🤝 Друзья',e:'🤝',n:'Друг в походе',d:'Пригласить друга, который выиграл первый бой',c:p=>(p.refs||0)>=1},
+  {id:'recruiter_5',g:'🤝 Друзья',e:'📯',n:'Вербовщик',d:'Пригласить пятерых друзей, выигравших первый бой',goal:5,v:p=>p.refs||0,title:'Вербовщик'},
   {id:'challenge_1',g:'👑 Сокровища и армия',e:'🏅',n:'Участник испытания',d:'Пройти испытание недели',c:p=>p.challenges>=1},
   {id:'challenge_top3',g:'👑 Сокровища и армия',e:'🥇',n:'Чемпион недели',d:'Войти в тройку испытания недели',c:p=>p.top3,title:'Чемпион недели'},
 ];
@@ -4560,6 +4564,78 @@ function achSyncRun(){
   achMax('maxMagic',magicPower()); if(leadershipExcess()===0) achMax('maxLead',leadershipUsed());
   achMax('legends',LEGEND_BY_LAND.filter(id=>ownsItem(id)).length);
   achCheck();
+}
+
+/* ================= ПРИГЛАШЕНИЯ И ПОСЫЛКИ =================
+   Ссылка-приглашение: BOT_APP_URL?startapp=ref_<код>, код — 10 символов хеша игрока. Друг, впервые открывший игру
+   по ссылке, получает посылку с 300💰; пригласивший — 200💰, когда друг выиграет первый бой (сервер проверяет это
+   по статистике, а не со слов игры). Все награды от сервера приходят «посылками» (/inbox) и забираются один раз
+   (/inbox/claim) — этим же путём позже пойдут покупки за звёзды, промокоды и подарки от разработчика. */
+let inboxCache=null;
+function refCode(){ return playerId&&playerId.startsWith('tg_')?playerId.slice(3,13):null; }
+function inviteLink(){ const c=refCode(); return c&&BOT_APP_URL?`${BOT_APP_URL}?startapp=ref_${c}`:null; }
+async function refRegisterIfInvited(){
+  const m=startSource().match(/^ref_([0-9a-f]{10})$/); if(!m||!tgInitData()) return;
+  try{ if(localStorage.getItem('morveyn_ref_done')) return; }catch(e){}
+  try{ const r=await apiPost('/ref/register',{initData:tgInitData(),code:m[1]});
+    try{ localStorage.setItem('morveyn_ref_done',String(r.status)); }catch(e){}
+    track('ref_register',{status:r.status});
+    if(r.status===200) setTimeout(()=>checkInbox(false),800);
+  }catch(e){}
+}
+async function checkInbox(silent){
+  if(!tgInitData()) return null;
+  try{ const r=await apiPost('/inbox',{initData:tgInitData()});
+    if(r.status!==200||!r.data) return null;
+    inboxCache=r.data; achMax('refs',r.data.qualified||0); achMax('refsInvited',r.data.invited||0); achCheck();
+    if(!silent&&inboxCache.rewards&&inboxCache.rewards.length) showInboxToast();
+    return r.data;
+  }catch(e){ return null; }
+}
+function rewardText(rw){
+  const p=rw.payload||{}, what=[p.gold?`+${p.gold}💰`:'',p.item&&ITEMS[p.item]?`${ITEMS[p.item].emoji} ${ITEMS[p.item].name}`:''].filter(Boolean).join(', ');
+  const why={ref_invitee:'подарок за приход по приглашению друга',ref_inviter:'ваш приглашённый друг выиграл первый бой',gift:'подарок от разработчика',promo:'промокод',purchase:'покупка'}[rw.kind]||rw.kind;
+  return `${what} — ${why}`;
+}
+function showInboxToast(){
+  const box=document.getElementById('tipBox'); if(!box.classList.contains('hidden')){ setTimeout(showInboxToast,1500); return; }
+  const list=inboxCache.rewards.map(rw=>`📦 ${rewardText(rw)}`).join('<br>');
+  document.getElementById('tipText').innerHTML=`<b>Вам посылка!</b><br>${list}<br><button style="margin-top:6px;" onclick="closeTip();claimInbox()">Забрать</button>`;
+  box.classList.remove('hidden'); if(typeof placeTip==='function') placeTip(); tipShowing='inbox';
+}
+async function claimInbox(){
+  if(!inboxCache||!inboxCache.rewards||!inboxCache.rewards.length) return;
+  if(challenge){ setInfo('📦 Посылку можно забрать в кампании — вернитесь к ней через меню испытания.'); return; }
+  try{ const r=await apiPost('/inbox/claim',{initData:tgInitData(),ids:inboxCache.rewards.map(x=>x.id)});
+    if(r.status!==200||!r.data) { setInfo('📦 Не удалось забрать посылку — попробуйте позже.'); return; }
+    const got=[]; (r.data.claimed||[]).forEach(rw=>{ const p=rw.payload||{};
+      if(p.gold){ gold+=p.gold; stats.goldEarned+=p.gold; }
+      if(p.item&&ITEMS[p.item]) inventory.push(p.item);
+      got.push(rewardText(rw)); });
+    inboxCache.rewards=[]; updateHud(); saveSoon(true);
+    track('inbox_claim',{n:got.length});
+    setInfo(got.length?`📦 Получено: ${got.join('; ')}.`:'📦 Посылка уже была получена.');
+  }catch(e){ setInfo('📦 Нет связи с сервером — посылка подождёт.'); }
+}
+async function openInvite(){
+  const link=inviteLink();
+  if(!link){ openModal(`<h2>👥 Пригласить друга</h2><div class="modalNote">Приглашения работают в Telegram — откройте игру через бота.</div><button class="secondary" style="width:100%;margin-top:10px;" onclick="closeModal()">Закрыть</button>`); return; }
+  const render=()=>{ const ib=inboxCache||{invited:0,qualified:0,rewards:[]};
+    openModal(`<h2>👥 Пригласить друга</h2>
+      <div class="modalNote" style="color:var(--text);">Друг, который впервые откроет игру по вашей ссылке, получит <b>300💰</b>. Когда он выиграет первый бой — вам придёт посылка с <b>200💰</b>.</div>
+      <div class="modalNote" style="margin-top:8px;">Приглашено: <b>${ib.invited}</b> · выиграли первый бой: <b>${ib.qualified}</b>. Пятеро — достижение и звание «Вербовщик».</div>
+      <div class="modalNote" style="margin-top:8px;word-break:break-all;font-size:12px;">${link}</div>
+      <button style="width:100%;margin-top:10px;" onclick="shareInvite()">📤 Отправить приглашение</button>
+      ${ib.rewards&&ib.rewards.length?`<button class="secondary" style="width:100%;margin-top:8px;" onclick="closeModal();claimInbox()">📦 Забрать посылки (${ib.rewards.length})</button>`:''}
+      <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeModal()">Закрыть</button>`); };
+  render(); await checkInbox(true); if(modalOpen()) render();
+}
+function shareInvite(){
+  const link=inviteLink(); if(!link) return;
+  const text='⚔️ Играю в «Морвейн» — пошаговую стратегию прямо в Telegram. Заходи по моей ссылке — получишь 300 золота на старте:';
+  const url=`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+  const tg=window.Telegram&&window.Telegram.WebApp; if(tg&&tg.initData&&tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url,'_blank');
+  track('ref_share',{});
 }
 
 const GAME_INTRO=`Пять земель по 80×60 клеток, каждая опаснее предыдущей. В каждой — 5 городов и 8 замков: покорите землю целиком, чтобы открыть путь к следующей. Между землями плавают из любой пристани — корабль плывёт с вами.`;
@@ -4989,7 +5065,9 @@ function loadSlot(slot){
 }
 
 async function bootGame(){
-  applyIcons(); getPlayerId(); achLoadCloud(); // код игрока — сразу, чтобы он был в отчёте об ошибке
+  applyIcons(); getPlayerId(); achLoadCloud();
+  // приглашение по ссылке и посылки — после того, как определился код игрока
+  setTimeout(async()=>{ await getPlayerId(); await refRegisterIfInvited(); checkInbox(false); },2500); // код игрока — сразу, чтобы он был в отчёте об ошибке
   track('session_start',{screen:`${innerWidth}x${innerHeight}`,lang:navigator.language,returning:!!localStorage.getItem(SAVE_KEY),src:startSource()});
   showView('map'); layoutViewport();
   setInfo('⏳ Загрузка сохранения...');
