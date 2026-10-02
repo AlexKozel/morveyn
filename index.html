@@ -254,7 +254,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.19.4', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.20.0', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -998,6 +998,59 @@ function capturedTotal(){ return allPois().filter(p=>(p.type==='castle'||p.type=
 function rankIndex(){ const n=capturedTotal(); let i=0; RANK_THRESHOLDS.forEach((t,k)=>{ if(n>=t) i=k; }); return Math.min(RANKS.length-1,i); }
 function currentRank(){ return RANKS[rankIndex()]; }
 function leadershipMax(){ return currentRank().leadership + bonusLeadership + equipBonus('leadership') + (week<=quasiExpireWeek?quasiBonus:0); }
+/* Превышение лидерства. Шанс бунта в начале каждого боя = превышение ÷ лимит × 2, в пределах 10–95%;
+   у рыцаря на 15 пунктов ниже (не меньше 5%). Бунтуют только активные отряды: первыми — самые требовательные
+   (больше лидерства за бойца), при равенстве — самый большой отряд; уходит ровно столько, сколько покрывает превышение. */
+function leadershipExcess(){ return Math.max(0,leadershipUsed()-leadershipMax()); }
+function mutinyChance(excess){
+  excess=excess===undefined?leadershipExcess():excess; if(excess<=0) return 0;
+  let c=Math.min(0.95,Math.max(0.10,excess/Math.max(1,leadershipMax())*2));
+  if(heroClass==='knight') c=Math.max(0.05,c-0.15);
+  return c;
+}
+function mutinyChancePct(excess){ return Math.round(mutinyChance(excess)*100); }
+function mutinyPlan(){
+  let rest=leadershipExcess(); const out=[]; if(rest<=0) return out;
+  const act=activeStacks().slice().sort((a,b)=>UNITS[b.key].leadershipCost-UNITS[a.key].leadershipCost||b.hp-a.hp);
+  for(const a of act){ if(rest<=0) break; const u=UNITS[a.key], cnt=Math.ceil(a.hp/u.hp), n=Math.min(cnt,Math.ceil(rest/u.leadershipCost));
+    out.push({a,key:a.key,n}); rest-=n*u.leadershipCost; }
+  return out;
+}
+function mutinyText(plan){ return plan.map(x=>`${UNITS[x.key].name} ×${x.n}`).join(', '); }
+let pendingBattle=null;
+function openMutinyWarning(enc){
+  pendingBattle=enc; const plan=mutinyPlan(), ch=mutinyChancePct();
+  openModal(`<h2>⚠️ Армия на грани бунта</h2>
+    <div class="modalNote">Лидерство превышено на <b>${leadershipExcess()}</b> (${leadershipUsed()}/${leadershipMax()}). В начале боя шанс бунта — <b>${ch}%</b>${heroClass==='knight'?' (рыцарь снижает его на 15%)':''}.</div>
+    <div class="modalNote" style="color:var(--text);margin-top:6px;">Если случится, к врагу перейдут: <b>${mutinyText(plan)}</b>.</div>
+    <button style="width:100%;margin-top:10px;" onclick="dismissMutineersAndFight()">Распустить их и в бой</button>
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="mutinyFight()">⚔️ Всё равно в бой (риск ${ch}%)</button>
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="mutinyCancel()">Отказаться от боя</button>
+    <div class="modalNote" style="font-size:11.5px;margin-top:6px;">Можно распустить других бойцов в окне армии («Уволить») — бунтуют всегда самые требовательные.</div>`);
+}
+function mutinyFight(){ closeModal(); const e=pendingBattle; pendingBattle=null; if(!e) return; e._mutinyOk=true; beginBattle(e); }
+function dismissMutineersAndFight(){
+  mutinyPlan().forEach(x=>{ const lost=x.n*UNITS[x.key].hp; x.a.hp=Math.max(0,x.a.hp-lost); x.a.max=Math.max(x.a.hp,x.a.max-lost); });
+  army=army.filter(a=>a.hp>0); updateHud(); mutinyFight();
+}
+function mutinyCancel(){ closeModal(); pendingBattle=null; curEncounter=null; currentWallBonus=0; setInfo('Вы отказались от боя.'); renderMap(); }
+/* Бунт в начале боя: лишняя часть самых требовательных отрядов переходит к врагу и после боя не возвращается. */
+function doMutiny(){
+  const plan=mutinyPlan(); let lostTotal=0;
+  plan.forEach((x,i)=>{
+    const u=UNITS[x.key], lost=x.n*u.hp, st=stacks.find(s=>s.side==='player'&&s.armyId===x.a.id);
+    if(st){ st.hp=Math.max(0,st.hp-lost); st.startHp=Math.max(0,(st.startHp||0)-lost); }
+    x.a.hp=Math.max(0,x.a.hp-lost); x.a.max=Math.max(x.a.hp,x.a.max-lost); lostTotal+=x.n;
+    let cell=null;
+    for(let c=BF_COLS-2;c>=1&&!cell;c--) for(const r of bSlotRows(BF_ROWS)) if(bFree(r,c,null)){ cell={r,c}; break; }
+    if(!cell) cell={r:0,c:BF_COLS-2};
+    stacks.push({id:'m'+i,side:'enemy',key:x.key,hp:lost,maxHp:lost,row:cell.r,col:cell.c,mutineer:true});
+    fxPush({type:'burst',r:cell.r,c:cell.c,emoji:'⚠️',dur:900});
+  });
+  stats.troopsLost+=lostTotal; updateHud();
+  bLog(`⚠️ Бунт! ${mutinyText(plan)} переходят на сторону врага!`);
+  track('mutiny',{lost:lostTotal});
+}
 function leadershipUsed(){ return army.filter(a=>a.hp>0).reduce((s,a)=>s+Math.ceil(a.hp/UNITS[a.key].hp)*UNITS[a.key].leadershipCost,0); }
 function updateHud(){
   trackGold();
@@ -1006,7 +1059,7 @@ function updateHud(){
   document.getElementById('week').textContent=week;
   document.getElementById('moves').textContent=movesLeft;
   document.getElementById('rank').textContent=currentRank().name;
-  document.getElementById('leadership').textContent=`${leadershipUsed()}/${leadershipMax()}`;
+  { const le=document.getElementById('leadership'); le.textContent=`${leadershipUsed()}/${leadershipMax()}`; le.style.color=leadershipExcess()>0?'var(--bad)':''; }
   document.getElementById('pieces').textContent=`${mapPieces}/${TOTAL_PIECES}`;
   document.getElementById('contName').textContent=contCfg().emoji;
   document.getElementById('contName').title=contCfg().name;
@@ -1288,14 +1341,43 @@ function power(items,isArmy){
 }
 /* Отряд готов присоединиться, если ваша армия заметно сильнее — такие не нападают и не преследуют. */
 function lairWilling(lair){ return power(army,true)>power(lair.enemies,false)*1.6; }
+/* Найм отряда с карты: цена бойца — городская (8 + 8 × уровень) × 1,3; платите только за нанятых.
+   «Помещаются» — по свободному лидерству и ячейкам армии; «все» — сверх лидерства (риск бунта), но ячейки обязательны.
+   Не нанятые расходятся, логово очищается. */
+function hirePrice(key){ return Math.round((8+8*UNITS[key].tier)*1.3); }
+function hirePlan(lair){
+  let free=leadershipMax()-leadershipUsed();
+  const slots0=(5-activeStacks().length)+(5-reserveStacks().length);
+  let slotsFit=slots0, slotsAll=slots0; const fit=[], all=[];
+  lair.enemies.forEach(e=>{
+    const u=UNITS[e.key], has=army.some(a=>a.key===e.key&&a.hp>0);
+    let nAll=e.count; if(!has){ if(slotsAll>0) slotsAll--; else nAll=0; }
+    all.push({key:e.key,n:nAll});
+    let n=Math.max(0,Math.min(e.count,Math.floor(free/u.leadershipCost)));
+    if(n>0&&!has){ if(slotsFit>0) slotsFit--; else n=0; }
+    free-=n*u.leadershipCost; fit.push({key:e.key,n});
+  });
+  const sum=l=>({n:l.reduce((a,x)=>a+x.n,0),cost:l.reduce((a,x)=>a+x.n*hirePrice(x.key),0),lead:l.reduce((a,x)=>a+x.n*UNITS[x.key].leadershipCost,0)});
+  return {fit,all,F:sum(fit),A:sum(all),total:lair.enemies.reduce((a,e)=>a+e.count,0),slots0};
+}
 function startEncounter(lair,caught){
   const enemyPow=power(lair.enemies,false), armyPow=power(army,true), ratio=enemyPow/Math.max(1,armyPow);
   const comp=lair.enemies.map(e=>`${UNITS[e.key].emoji} ${UNITS[e.key].name}×${e.count}${infoBtn(e.key,e.count)}`).join(', ');
   const verdict=ratio<0.6?'<span style="color:var(--good)">заметно слабее вас</span>':ratio<1.1?'<span style="color:var(--accent)">примерно равны вам</span>':'<span style="color:var(--bad)">сильнее вас</span>';
-  const willing=lairWilling(lair), cost=Math.max(50,Math.round(enemyPow*2.5));
-  setInfo(`${lair.emoji} <b>${lair.name}</b>${caught?' настигает вас!':''}<br>${comp} — ${verdict}.<br>
+  let hire='';
+  if(lairWilling(lair)){
+    const pl=hirePlan(lair);
+    const exAll=Math.max(0,leadershipUsed()+pl.A.lead-leadershipMax());
+    const why=pl.A.n===0?'нет свободной ячейки в армии':'не хватает лидерства';
+    hire=`<div class="armyline" style="color:var(--text);margin-top:4px;">🤝 Готовы присоединиться. Помещается <b>${pl.F.n}</b> из ${pl.total} (по лидерству и ячейкам армии).</div>`;
+    hire+=pl.F.n>0?`<button ${gold<pl.F.cost?'disabled':''} onclick="joinAccept(${lair.r},${lair.c},'fit')">💰 Нанять ${pl.F.n} за ${pl.F.cost}</button>`
+                   :`<button disabled>💰 Нанять — ${why}</button>`;
+    if(pl.A.n>pl.F.n) hire+=` <button class="secondary" ${gold<pl.A.cost?'disabled':''} onclick="joinAccept(${lair.r},${lair.c},'all')">⚠️ Всех ${pl.A.n} за ${pl.A.cost} — сверх лидерства, шанс бунта ${mutinyChancePct(exAll)}%</button>`;
+    if(pl.F.n>0&&gold<pl.F.cost) hire+=`<div class="armyline" style="color:var(--bad);">Не хватает золота: нужно ${pl.F.cost}, у вас ${gold}.</div>`;
+    hire+='<br>';
+  }
+  setInfo(`${lair.emoji} <b>${lair.name}</b>${caught?' настигает вас!':''}<br>${comp} — ${verdict}.<br>${hire}
     <button onclick="joinDecline(${lair.r},${lair.c})">⚔️ Атаковать</button>
-    ${willing?`<button onclick="joinAccept(${lair.r},${lair.c},${cost})">💰 Нанять за ${cost}</button>`:''}
     <button class="secondary" onclick="lairLeave(${lair.r},${lair.c})">🚶 Уйти</button>`);
 }
 function lairLeave(r,c){
@@ -1304,21 +1386,18 @@ function lairLeave(r,c){
   setInfo(`Вы обошли «${lair?lair.name:'отряд'}» стороной. До конца завтрашнего дня он вас не тронет.`);
   renderMap();
 }
-function joinAccept(r,c,cost){
-  const lair=pois.find(p=>p.r===r&&p.c===c);
-  if(gold<cost){ setInfo('Недостаточно золота — придётся сразиться!'); curEncounter={type:'lair',ref:lair}; beginBattle(lair); return; }
-  gold-=cost; updateHud();
-  let noRoom=false;
-  lair.enemies.forEach(e=>{
-    const existing=army.find(a=>a.key===e.key && a.hp>0);
-    const addHp=e.count*UNITS[e.key].hp;
-    if(existing){ existing.hp+=addHp; existing.max+=addHp; }
-    else{ const slot=freeSlot(); if(!slot){ noRoom=true; return; } army.push({id:Date.now()+Math.random(),key:e.key,hp:addHp,max:addHp,zone:slot}); }
-  });
+function joinAccept(r,c,mode){
+  const lair=pois.find(p=>p.r===r&&p.c===c&&p.type==='lair'); if(!lair) return;
+  const pl=hirePlan(lair), list=mode==='all'?pl.all:pl.fit, S=mode==='all'?pl.A:pl.F;
+  if(S.n===0||gold<S.cost){ startEncounter(lair); return; }
+  gold-=S.cost;
+  list.forEach(x=>{ if(!x.n) return; const add=x.n*UNITS[x.key].hp, ex=army.find(a=>a.key===x.key&&a.hp>0);
+    if(ex){ ex.hp+=add; ex.max+=add; } else { const slot=freeSlot(); if(slot) army.push({id:Date.now()+Math.random(),key:x.key,hp:add,max:add,zone:slot}); } });
   visited[key(lair.r,lair.c)+':lair']=true;
-  if(noRoom) setTimeout(()=>setInfo('⚠️ Часть отрядов не поместилась — все 10 слотов армии заняты.'),1400);
-  const qmsg=questOnLairCleared(lair);
-  setInfo(`${lair.name} присоединились к вашей армии!${qmsg?'<br>'+qmsg:''}`);
+  const left=pl.total-S.n, qmsg=questOnLairCleared(lair), ex=leadershipExcess();
+  track('hire',{n:S.n,cost:S.cost,mode,excess:ex});
+  updateHud();
+  setInfo(`💰 Нанято ${S.n} за ${S.cost}💰.${left>0?` Остальные (${left}) разошлись.`:''}${ex>0?`<br>⚠️ Лидерство превышено на ${ex}: в начале каждого боя шанс бунта ${mutinyChancePct()}%.`:''}${qmsg?'<br>'+qmsg:''}`);
   renderMap();
 }
 function joinDecline(r,c){ const lair=pois.find(p=>p.r===r&&p.c===c); curEncounter={type:'lair',ref:lair}; beginBattle(lair); }
@@ -1822,6 +1901,7 @@ function renderArmyView(msg){
   const act=activeStacks(), res=reserveStacks();
   let html=`<div class="cityCard"><h2>👥 Активный отряд (${act.length}/5)</h2><div class="armyline">Сражается в бою.</div>`;
   if(msg) html+=`<div class="armyline" style="color:var(--good);margin-bottom:6px;">${msg}</div>`;
+  if(leadershipExcess()>0) html+=`<div class="armyline" style="color:var(--bad);margin-bottom:6px;">⚠️ Лидерство превышено на ${leadershipExcess()} (${leadershipUsed()}/${leadershipMax()}). В начале каждого боя шанс бунта ${mutinyChancePct()}%: к врагу перейдут ${mutinyText(mutinyPlan())}. Уволите лишних — риск исчезнет.</div>`;
   if(act.length===0) html+=`<div class="armyline">Пусто — в бой пойти будет не с кем!</div>`;
   act.forEach(a=>{ html+=renderArmyStackRow(a); });
   html+=`</div><div class="cityCard"><h2>🛡️ Резерв (${res.length}/5)</h2><div class="armyline">Не участвует в бою, но занимает слот.</div>`;
@@ -1860,6 +1940,9 @@ function bOccupied(r,c){ return isObst(r,c)||stacks.some(s=>s.hp>0&&s.row===r&&s
 function bLog(t){ logLines.push(t); if(logLines.length>60) logLines.shift(); }
 function syncArmyFromBattle(){ stacks.filter(s=>s.side==='player').forEach(s=>{ const a=army.find(x=>x.id===s.armyId); if(a) a.hp=s.hp; }); }
 function beginBattle(enc){
+  // превышение лидерства — сначала предупреждение (до броска удачи испытания, чтобы отказ не тратил попытку)
+  if(leadershipExcess()>0&&!enc._mutinyOk){ openMutinyWarning(enc); return; }
+  delete enc._mutinyOk;
   // испытание: свой поток случайности на каждый бой — клетка боя + номер попытки на ней
   if(challenge){ const k=hero.row+','+hero.col; challenge.attempts[k]=(challenge.attempts[k]||0)+1; setStream('b|'+k+'|'+challenge.attempts[k]); }
   logLines=[]; battleOver=false; showTip('battle');
@@ -1870,6 +1953,7 @@ function beginBattle(enc){
   enc.enemies.forEach((e,i)=>{ const hp=e.count*UNITS[e.key].hp; stacks.push({id:'e'+i,side:'enemy',key:e.key,hp:hp,maxHp:hp,row:erows[i],col:BF_COLS-1}); });
   bfx=[]; bVis={}; bObst=[]; bScene=makeBattleScene(enc); bObst=genObstacles(bScene);
   bLog(`⚔️ Бой у «${enc.name}» начался!`);
+  if(leadershipExcess()>0){ const ch=mutinyChance(); if(R()<ch) doMutiny(); else bLog(`🤝 Армия была на грани бунта (шанс ${Math.round(ch*100)}%), но подчинилась.`); }
   order=stacks.slice().sort((a,b)=>bUnit(b).speed-bUnit(a).speed); idx=0;
   showView('battle');
   bProcessTurn();
@@ -2014,41 +2098,54 @@ function aiAct(stack){
   // 1) вплотную — бьёт; 2) стрелок — стреляет в ближайшего; 3) можно подойти и ударить — подходит и бьёт (ближайшую доступную цель)
   if(dist(stack,targets[0])<=1){ doAttack(stack,targets[0]); renderBattle(); bEndTurn(); return; }
   if(u.ranged){ doAttack(stack,targets[0]); renderBattle(); bEndTurn(); return; }
-  for(const t of targets){ const ap=bApproachCell(stack,t);
-    if(ap){ stack.row=ap.row; stack.col=ap.col; bLog(`${u.emoji} «${u.name}» подходит и атакует`); doAttack(stack,t,230); renderBattle(); bEndTurn(); return; } }
-  // 4) иначе — идёт к ближайшей цели на всю дальность хода
-  const target=targets[0];
-  for(let step=0;step<bMoveRange(stack)&&dist(stack,target)>1;step++){
-    const r0=stack.row, c0=stack.col;
-    const dr=Math.sign(target.row-stack.row), dc=Math.sign(target.col-stack.col);
-    const nr=stack.row+dr, nc=stack.col+dc;
-    if(!bOccupied(nr,nc)&&nr>=0&&nr<BF_ROWS&&nc>=0&&nc<BF_COLS){ stack.row=nr; stack.col=nc; }
-    else if(!bOccupied(stack.row,nc)&&nc>=0&&nc<BF_COLS) stack.col=nc;
-    else if(!bOccupied(nr,stack.col)&&nr>=0&&nr<BF_ROWS) stack.row=nr;
-    else { // обход препятствия: любая свободная соседняя клетка, не удаляющая от цели
-      const cur=dist(stack,target); let best=null;
-      for(let a=-1;a<=1;a++) for(let b=-1;b<=1;b++){ const rr=stack.row+a, cc=stack.col+b;
-        if((a||b)&&rr>=0&&rr<BF_ROWS&&cc>=0&&cc<BF_COLS&&!bOccupied(rr,cc)){ const d=dist({row:rr,col:cc},target); if(d<=cur&&(!best||d<best.d)) best={rr,cc,d}; } }
-      if(best){ stack.row=best.rr; stack.col=best.cc; }
-    }
-    if(stack.row===r0&&stack.col===c0) break; // упёрся
-  }
+  const reach=bReach(stack);
+  for(const t of targets){ const ap=bApproachCell(stack,t,reach);
+    if(ap){ const steps=bMoveAlong(stack,reach,ap.row,ap.col); bLog(`${u.emoji} «${u.name}» подходит и атакует`); doAttack(stack,t,130*steps+60); renderBattle(); bEndTurn(); return; } }
+  // 4) иначе — идёт к ближайшей по земле цели: выбирает достижимую клетку, откуда до неё ближе всего в обход препятствий
+  let bestCell=null;
+  for(const t of targets){ const field=bFieldTo(t,stack);
+    reach.forEach(n=>{ const fd=field.get(n.r+','+n.c); if(fd===undefined) return;
+      if(!bestCell||fd<bestCell.fd||(fd===bestCell.fd&&n.d<bestCell.d)) bestCell={r:n.r,c:n.c,fd,d:n.d}; }); }
+  if(bestCell&&!(bestCell.r===stack.row&&bestCell.c===stack.col)) bMoveAlong(stack,reach,bestCell.r,bestCell.c);
   bLog(`${u.emoji} «${u.name}» двигается`);
   renderBattle(); bEndTurn();
 }
 function dist(a,b){ return Math.max(Math.abs(a.row-b.row),Math.abs(a.col-b.col)); }
 /* Дальность хода отряда: половина скорости, не меньше 1. */
 function bMoveRange(stack){ return Math.max(1,Math.round(bUnit(stack).speed/2)); }
+/* Поиск пути в бою: отряд идёт по свободным клеткам (8 направлений), сквозь войска и препятствия не проходит,
+   по диагонали между двумя занятыми клетками не протискивается. bReach — куда можно дойти за ход (с путями). */
+const DIRS8B=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+function bFree(r,c,self){ return r>=0&&r<BF_ROWS&&c>=0&&c<BF_COLS&&!isObst(r,c)&&!stacks.some(s=>s!==self&&s.hp>0&&s.row===r&&s.col===c); }
+function bStepOk(r,c,dr,dc,self){ return bFree(r+dr,c+dc,self)&&!(dr&&dc&&!bFree(r+dr,c,self)&&!bFree(r,c+dc,self)); }
+function bReach(stack,maxSteps){
+  const mr=maxSteps===undefined?bMoveRange(stack):maxSteps, start=stack.row+','+stack.col;
+  const seen=new Map([[start,{d:0,prev:null,r:stack.row,c:stack.col}]]), q=[[stack.row,stack.col]];
+  for(let i=0;i<q.length;i++){ const [r,c]=q[i], cur=seen.get(r+','+c); if(cur.d>=mr) continue;
+    for(const [dr,dc] of DIRS8B){ const nr=r+dr, nc=c+dc, k=nr+','+nc; if(seen.has(k)||!bStepOk(r,c,dr,dc,stack)) continue;
+      seen.set(k,{d:cur.d+1,prev:r+','+c,r:nr,c:nc}); q.push([nr,nc]); } }
+  return seen;
+}
+function bPathTo(reach,r,c){ const out=[]; let k=r+','+c; while(k){ const n=reach.get(k); if(!n) break; out.unshift({row:n.r,col:n.c}); k=n.prev; } return out; }
+/* Перемещение по пути; возвращает длину пути в шагах (для задержки удара после подхода). */
+function bMoveAlong(stack,reach,r,c){ const path=bPathTo(reach,r,c); stack.movePath=path; stack.row=r; stack.col=c; return Math.max(0,path.length-1); }
+/* Расстояние «по земле» до цели от каждой клетки — чтобы ИИ обходил стены, а не упирался в них. */
+function bFieldTo(target,self){
+  const f=new Map([[target.row+','+target.col,0]]), q=[[target.row,target.col]];
+  for(let i=0;i<q.length;i++){ const [r,c]=q[i], d=f.get(r+','+c);
+    for(const [dr,dc] of DIRS8B){ const nr=r+dr, nc=c+dc, k=nr+','+nc; if(f.has(k)||!bStepOk(r,c,dr,dc,self)) continue; f.set(k,d+1); q.push([nr,nc]); } }
+  return f;
+}
 /* Клетка, с которой отряд может ударить цель в этот же ход: свободна, рядом с целью и в пределах хода.
    Из подходящих — ближайшая к отряду (меньше шагов), при равенстве — ближайшая к прямой линии. */
-function bApproachCell(stack,target){
-  const mr=bMoveRange(stack); let best=null;
+function bApproachCell(stack,target,reach){
+  reach=reach||bReach(stack); let best=null;
   for(let a=-1;a<=1;a++) for(let b=-1;b<=1;b++){
     if(!a&&!b) continue; const r=target.row+a, c=target.col+b;
-    if(r<0||r>=BF_ROWS||c<0||c>=BF_COLS||bOccupied(r,c)) continue;
-    const d=dist(stack,{row:r,col:c}); if(d>mr) continue;
+    if(r===stack.row&&c===stack.col) continue;
+    const n=reach.get(r+','+c); if(!n) continue;
     const tie=Math.abs(r-stack.row)+Math.abs(c-stack.col);
-    if(!best||d<best.d||(d===best.d&&tie<best.tie)) best={row:r,col:c,d,tie};
+    if(!best||n.d<best.d||(n.d===best.d&&tie<best.tie)) best={row:r,col:c,d:n.d,tie};
   }
   return best;
 }
@@ -2063,14 +2160,13 @@ function cellClick(r,c){
     const d=dist(cur,target);
     if(u.ranged||d<=1){ doAttack(cur,target); renderBattle(); bEndTurn(); return; }
     // подойти и ударить за один ход
-    const ap=bApproachCell(cur,target);
-    if(ap){ cur.row=ap.row; cur.col=ap.col; bLog(`${u.emoji} «${u.name}» подходит и атакует`); doAttack(cur,target,230); renderBattle(); bEndTurn(); }
+    const reach=bReach(cur), ap=bApproachCell(cur,target,reach);
+    if(ap){ const steps=bMoveAlong(cur,reach,ap.row,ap.col); bLog(`${u.emoji} «${u.name}» подходит и атакует`); doAttack(cur,target,130*steps+60); renderBattle(); bEndTurn(); }
     return;
   }
   if(!target){
-    if(isObst(r,c)) return;
-    const mr=Math.max(1,Math.round(u.speed/2));
-    if(dist(cur,{row:r,col:c})<=mr){ cur.row=r; cur.col=c; bLog(`${u.emoji} «${u.name}» перемещается`); renderBattle(); bEndTurn(); }
+    const reach=bReach(cur), k=r+','+c;
+    if(reach.has(k)&&!(r===cur.row&&c===cur.col)){ bMoveAlong(cur,reach,r,c); bLog(`${u.emoji} «${u.name}» перемещается`); renderBattle(); bEndTurn(); }
   }
 }
 function castSpell(k){
@@ -2253,12 +2349,11 @@ function drawBattleCanvas(now){
   const cur=order[idx]&&stacks.find(s=>s.id===order[idx].id&&s.hp>0);
   const myTurn=!battleOver&&cur&&cur.side==='player';
   if(myTurn){
-    const u=bUnit(cur), mr=Math.max(1,Math.round(u.speed/2));
-    for(let r=0;r<BF_ROWS;r++) for(let c=0;c<BF_COLS;c++){
-      if(bOccupied(r,c)||dist(cur,{row:r,col:c})>mr) continue;
-      g.fillStyle='rgba(170,255,150,0.16)'; g.fillRect(PX(r,c)+2,PY(r,c)+2,cell-4,cell-4);
-      g.fillStyle='rgba(200,255,180,0.6)'; g.beginPath(); g.arc(PX(r,c)+cell/2,PY(r,c)+cell/2,Math.max(1.5,cell*0.05),0,Math.PI*2); g.fill();
-    }
+    const reach=bReach(cur);
+    reach.forEach(n=>{ if(n.d===0) return; const x=PX(n.r,n.c), y=PY(n.r,n.c), ins=Math.max(2,cell*0.06);
+      g.fillStyle='rgba(120,220,100,0.32)'; pathRoundRect(g,x+ins,y+ins,cell-2*ins,cell-2*ins,[cell*0.12,cell*0.12,cell*0.12,cell*0.12]); g.fill();
+      g.strokeStyle='rgba(210,255,190,0.9)'; g.lineWidth=Math.max(1.5,cell*0.04); g.stroke();
+      g.fillStyle='rgba(235,255,225,0.9)'; g.beginPath(); g.arc(x+cell/2,y+cell/2,Math.max(2,cell*0.06),0,Math.PI*2); g.fill(); });
   }
   // препятствия
   bObst.slice().sort((a,b)=>PY(a.r,a.c)-PY(b.r,b.c)).forEach(o=>{
@@ -2280,8 +2375,13 @@ function drawBattleCanvas(now){
   const pos={};
   stacks.forEach(s=>{
     let v=bVis[s.id]; if(!v) v=bVis[s.id]={r:s.row,c:s.col,fr:s.row,fc:s.col,tr:s.row,tc:s.col,t0:0};
-    if(v.tr!==s.row||v.tc!==s.col){ v.fr=v.r; v.fc=v.c; v.tr=s.row; v.tc=s.col; v.t0=now; }
-    const p=Math.min(1,(now-v.t0)/240), e=easeIO(p); v.r=v.fr+(v.tr-v.fr)*e; v.c=v.fc+(v.tc-v.fc)*e; if(p<1) active=true;
+    if(v.tr!==s.row||v.tc!==s.col){ v.fr=v.r; v.fc=v.c; v.tr=s.row; v.tc=s.col; v.t0=now; v.path=(s.movePath&&s.movePath.length>1)?s.movePath:null; s.movePath=null; }
+    let p;
+    if(v.path){ // идём по клеткам пути, а не напрямик сквозь соседей
+      const segs=v.path.length-1, q=Math.min(1,(now-v.t0)/(130*segs)), f=q*segs, i=Math.min(segs-1,Math.floor(f)), t=f-i;
+      v.r=v.path[i].row+(v.path[i+1].row-v.path[i].row)*t; v.c=v.path[i].col+(v.path[i+1].col-v.path[i].col)*t; p=q; if(q>=1) v.path=null;
+    } else { p=Math.min(1,(now-v.t0)/240); const e=easeIO(p); v.r=v.fr+(v.tr-v.fr)*e; v.c=v.fc+(v.tc-v.fc)*e; }
+    if(p<1) active=true;
     if(s.hp<=0){ if(v.deadAt===undefined) v.deadAt=now+260; } else v.deadAt=undefined;
     let ox=0, oy=0;
     bfx.forEach(f=>{ if(f.id!==s.id||now<f.t0) return; const q=(now-f.t0)/f.dur; if(q>1) return;
