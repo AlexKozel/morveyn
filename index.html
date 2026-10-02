@@ -164,6 +164,11 @@
 
   .infoBtn{width:22px; height:22px; min-width:22px; padding:0 !important; border-radius:50% !important; font-family:Georgia,serif; font-style:italic;
     font-weight:bold !important; font-size:13px !important; line-height:20px; vertical-align:middle; margin:0 2px;}
+
+  .orderBtn{min-width:30px; padding:4px 6px !important; font-weight:bold !important;}
+
+  .battleLogList{max-height:55vh; overflow-y:auto; font-size:13px; line-height:1.5; margin-top:6px; padding-right:4px;}
+  .battleLogList div{padding:3px 0; border-bottom:1px dashed rgba(233,196,106,0.15);}
 </style>
 </head>
 <body>
@@ -254,7 +259,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.20.0', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.20.6', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -414,7 +419,7 @@ function pickN(arr,n,rng){
 const SPELLS=[
   {key:'heal',name:'Исцеление',cost:80,emoji:'✨',desc:'Лечит 30% отряда в бою',reqMagic:0},
   {key:'fireball',name:'Огненный шар',cost:120,emoji:'🔥',desc:'30 урона по врагу в бою',reqMagic:0},
-  {key:'haste',name:'Ускорение',cost:60,emoji:'💨',desc:'Даёт доп. ход в бою',reqMagic:5},
+  {key:'haste',name:'Ускорение',cost:60,emoji:'💨',desc:'Отряд до конца боя ходит на 2 клетки дальше и действует раньше; ход не тратится',reqMagic:5},
   {key:'multiply',name:'Размножение',cost:100,emoji:'🐣',desc:'+25-50% числа юнитов в отряде',reqMagic:8},
   {key:'resurrect',name:'Воскрешение',cost:130,emoji:'💫',desc:'Полностью восстанавливает отряд',reqMagic:10},
   {key:'infection',name:'Зараза',cost:110,emoji:'🦠',desc:'Урон врагу и соседним вражеским отрядам',reqMagic:8},
@@ -951,6 +956,8 @@ let army=[
   {id:3,key:'knights',hp:105,max:105,zone:'active'},
   {id:4,key:'mages',hp:12,max:12,zone:'active'},
 ];
+/* Максимум здоровья отряда никогда не меньше текущего здоровья (иначе лечение могло бы урезать отряд). */
+function normalizeArmy(){ army.forEach(a=>{ if(!(a.max>=a.hp)) a.max=a.hp; }); }
 function activeStacks(){ return army.filter(a=>a.zone==='active'&&a.hp>0); }
 function reserveStacks(){ return army.filter(a=>a.zone==='reserve'&&a.hp>0); }
 function freeSlot(){ if(activeStacks().length<5) return 'active'; if(reserveStacks().length<5) return 'reserve'; return null; }
@@ -992,7 +999,15 @@ function poiAt(r,c){
     return !visited[key(r,c)+':'+p.type];
   });
 }
-function setInfo(html){ document.getElementById('info').innerHTML=html; }
+/* После боя в первое сообщение с итогом добавляется кнопка «Лог боя» — весь ход сражения. */
+let lastBattleLog=[], battleLogFresh=false;
+function battleLogBtn(){ return lastBattleLog.length?` <button class="secondary" onclick="openBattleLog()">📜 Лог боя</button>`:''; }
+function openBattleLog(){
+  openModal(`<h2>📜 Ход последнего боя</h2><div class="battleLogList">${lastBattleLog.map((l,i)=>`<div><span style="color:var(--muted);">${i+1}.</span> ${l}</div>`).join('')}</div>
+    <button class="secondary" style="width:100%;margin-top:10px;" onclick="closeModal()">Закрыть</button>`);
+  const box=document.querySelector('.battleLogList'); if(box) box.scrollTop=box.scrollHeight;
+}
+function setInfo(html){ if(battleLogFresh&&html){ html+=battleLogBtn(); battleLogFresh=false; } document.getElementById('info').innerHTML=html; }
 function capturedCount(){ return pois.filter(p=>p.type==='castle'&&p.owner==='player').length; }
 function capturedTotal(){ return allPois().filter(p=>(p.type==='castle'||p.type==='governor')&&p.owner==='player').length; }
 function rankIndex(){ const n=capturedTotal(); let i=0; RANK_THRESHOLDS.forEach((t,k)=>{ if(n>=t) i=k; }); return Math.min(RANKS.length-1,i); }
@@ -1087,6 +1102,7 @@ function checkLandComplete(){
   }
 }
 function showView(v){
+  if(view==='battle'&&v!=='battle'){ lastBattleLog=logLines.slice(); battleLogFresh=true; }
   if(view==='battle'&&v!=='battle'&&challenge) setStream('d|'+day+'|'+(stats.battlesWon+stats.battlesLost+stats.retreats));
   view=v;
   setTimeout(syncBackButton,0);
@@ -1112,6 +1128,7 @@ function triggerGameOver(reason){
     <div class="cityCard"><h2 style="color:var(--bad);">💀 Игра окончена</h2>
     <p>${reason}</p>
     <p style="color:var(--muted);font-size:12.5px;">Жёсткий режим: поражение необратимо, второго шанса не будет.</p>
+    ${battleLogFresh&&lastBattleLog.length?`<button class="secondary" onclick="openBattleLog()">📜 Лог последнего боя</button>`:''}
     <button class="secondary" onclick="openStats(false)">📊 Летопись павшего героя</button>
     ${challenge?`<button onclick="resumeCampaign()">↩️ Вернуться к кампании</button>`:''}
     <button class="secondary" onclick="openNewGame(false)">🔄 Начать заново</button></div>`;
@@ -1721,13 +1738,29 @@ function castAdventureSpell(k){
   }
   renderMap();
 }
+/* «Переход к городу»: только места, где герой уже был (посещённые города, ваши замки и пещеры).
+   В каждой строке — рисунок, специализация, направление и расстояние от героя, отметка поручения. */
+function dirArrow(dr,dc){ if(!dr&&!dc) return '•'; const i=((Math.round(Math.atan2(dr,dc)/(Math.PI/4))%8)+8)%8; return ['→','↘','↓','↙','←','↖','↑','↗'][i]; }
 function showTownGatePicker(){
-  const destinations=pois.filter(p=>p.type==='city'||((p.type==='castle'||p.type==='cave'||p.type==='governor')&&p.owner==='player'));
-  if(destinations.length===0){ setInfo('🚪 Пока нет ни одной освоенной точки для телепортации.'); return; }
-  let html='🚪 <b>Переход к городу</b> — куда перенестись?<br>';
-  destinations.forEach(d=>{ html+=`<button onclick="doTownGate(${d.r},${d.c})">${d.emoji} ${d.name}</button> `; });
-  html+='<br><button class="secondary" onclick="setInfo(\'\')">Отмена</button>';
-  setInfo(html);
+  const isCapital=p=>CITY1&&p.r===CITY1.r&&p.c===CITY1.c;
+  const all=pois.filter(p=>p.type==='city'||((p.type==='castle'||p.type==='cave'||p.type==='governor')&&p.owner==='player'));
+  const visited=p=>p.type==='city'?(p.seen||isCapital(p)):true;
+  const dest=all.filter(p=>visited(p)&&!(p.r===hero.row&&p.c===hero.col)).map(p=>({p,d:chebyshev({r:hero.row,c:hero.col},p)})).sort((a,b)=>a.d-b.d);
+  const hiddenCities=all.filter(p=>!visited(p)).length;
+  if(!dest.length){ setInfo('🚪 Портал ведёт только туда, где вы уже бывали. Посетите город — и сможете возвращаться в него мгновенно.'); return; }
+  const rows=dest.map(({p,d})=>{
+    const kind=p.type==='city'?(isCapital(p)?'capital':'city'):p.type==='cave'?'cave':'castle';
+    const img=spriteURL(kind,40,kind==='castle'?'own':'');
+    const title=p.type==='city'?((p.shop&&p.shop.title)||'город'):p.type==='cave'?'⛰️ ваша пещера':p.type==='governor'?'👑 престол Хозяина Земли':'🏯 ваш замок';
+    const q=activeQuests().some(q=>q.type==='courier'&&q.cont===curCont&&q.dest===p.name)?' · ✉️ ждут ваше письмо':(p.quest&&p.quest.status==='offered'?' · 📜 есть поручение':'');
+    return `<button class="modeBtn secondary" style="display:flex;align-items:center;gap:10px;padding:8px 10px;" onclick="closeModal();doTownGate(${p.r},${p.c})">
+      <img alt="" src="${img}" style="width:34px;height:44px;flex:none;margin:-6px 0;">
+      <span style="flex:1;text-align:left;"><b>${p.name}</b>${isCapital(p)?' (столица)':''}<small>${title}${q}</small></span>
+      <span style="white-space:nowrap;font-size:13px;color:var(--muted);">${dirArrow(p.r-hero.row,p.c-hero.col)} ${d} кл.</span></button>`; }).join('');
+  openModal(`<h2>🚪 Переход к городу</h2><div class="modalNote">Портал ведёт туда, где вы уже бывали. Стрелка — направление от героя.</div>
+    ${rows}
+    ${hiddenCities?`<div class="modalNote" style="margin-top:8px;">Ещё ${hiddenCities} ${hiddenCities===1?'город':hiddenCities<5?'города':'городов'} земли откроются для портала после первого посещения.</div>`:''}
+    <button class="secondary" style="width:100%;margin-top:10px;" onclick="closeModal()">Отмена</button>`);
 }
 function doTownGate(r,c){
   spellCharges.towngate--; stats.spellsCast++; updateHud();
@@ -1792,6 +1825,7 @@ function buyItem(id){
 function leaveCity(){ showView('map'); setInfo(''); }
 function renderCity(msg){
   const p=curCity; if(!p) return;
+  if(msg&&battleLogFresh){ msg+=battleLogBtn(); battleLogFresh=false; }
   updateHud(); saveSoon();
   const armyLine=army.filter(a=>a.hp>0).map(a=>`${UNITS[a.key].emoji}${UNITS[a.key].name}×${Math.ceil(a.hp/UNITS[a.key].hp)}`).join(', ')||'нет отрядов';
   const sh=p.shop||{spells:[],items:[],workers:[]};
@@ -1886,20 +1920,37 @@ function sellItem(i){ const id=inventory[i]; if(!id) return; const it=ITEMS[id];
 
 /* ================= ARMY MANAGEMENT ================= */
 function openArmyView(){ if(view==='battle') return; showView('army'); renderArmyView(); }
+/* Порядок отрядов в списке = расстановка в бою: сверху вниз (в вертикальном поле — слева направо). */
+/* «Собрать сюда»: все отряды того же вида вливаются в этот. Чтобы поменять соотношение — соберите и разделите заново. */
+function mergeStacks(armyId){
+  const a=army.find(x=>String(x.id)===String(armyId)&&x.hp>0); if(!a) return;
+  const others=army.filter(x=>x!==a&&x.key===a.key&&x.hp>0); if(!others.length) return;
+  let n=0; others.forEach(o=>{ a.hp+=o.hp; a.max=Math.max(a.max,a.hp-o.hp)+Math.max(o.max||0,o.hp); n+=Math.ceil(o.hp/UNITS[o.key].hp); o.hp=0; });
+  army=army.filter(x=>x.hp>0); normalizeArmy();
+  renderArmyView(`В «${UNITS[a.key].name}» влились ещё ${n} — теперь ×${Math.ceil(a.hp/UNITS[a.key].hp)}.`);
+}
+function moveStackOrder(armyId,dir){
+  const a=army.find(x=>String(x.id)===String(armyId)&&x.hp>0); if(!a) return;
+  const list=army.filter(x=>x.zone===a.zone&&x.hp>0), i=list.indexOf(a), j=i+dir;
+  if(j<0||j>=list.length) return;
+  const ia=army.indexOf(a), ib=army.indexOf(list[j]); [army[ia],army[ib]]=[army[ib],army[ia]];
+  renderArmyView();
+}
 function renderArmyStackRow(a){
   const u=UNITS[a.key], cnt=Math.ceil(a.hp/u.hp);
   const targetZone=a.zone==='active'?'резерв':'актив';
+  const list=army.filter(x=>x.zone===a.zone&&x.hp>0), i=list.indexOf(a);
   return `<div class="row" style="flex-wrap:wrap;"><span>${unitImg(a.key)}<b>${u.name}</b>${infoBtn(a.key,cnt)} ×${cnt} (hp ${a.hp}/${a.max}, лид. ${cnt*u.leadershipCost})</span>
-      <span class="rowbtns"><button class="secondary" onclick="switchZone('${a.id}')">→ ${targetZone}</button></span></div>
+      <span class="rowbtns"><button class="secondary orderBtn" title="Выше" ${i<=0?'disabled':''} onclick="moveStackOrder('${a.id}',-1)">↑</button><button class="secondary orderBtn" title="Ниже" ${i>=list.length-1?'disabled':''} onclick="moveStackOrder('${a.id}',1)">↓</button><button class="secondary" onclick="switchZone('${a.id}')">→ ${targetZone}</button></span></div>
       <div class="row" style="padding-top:0;">
         <span style="font-size:12px;color:var(--muted);">Разделить: <input type="number" id="split_${a.id}" min="1" max="${cnt-1||0}" value="1" style="width:48px;"> шт</span>
-        <span class="rowbtns"><button onclick="splitStack('${a.id}')" ${cnt<2?'disabled':''}>Разделить</button><button class="secondary" onclick="dismissStack('${a.id}')">Уволить</button></span>
+        <span class="rowbtns"><button onclick="splitStack('${a.id}')" ${cnt<2?'disabled':''}>Разделить</button>${army.some(x=>x!==a&&x.key===a.key&&x.hp>0)?`<button class="secondary" title="Объединить все отряды этого вида в этот" onclick="mergeStacks('${a.id}')">⤵ Собрать сюда</button>`:''}<button class="secondary" onclick="dismissStack('${a.id}')">Уволить</button></span>
       </div>`;
 }
 function renderArmyView(msg){
   updateHud(); saveSoon();
   const act=activeStacks(), res=reserveStacks();
-  let html=`<div class="cityCard"><h2>👥 Активный отряд (${act.length}/5)</h2><div class="armyline">Сражается в бою.</div>`;
+  let html=`<div class="cityCard"><h2>👥 Активный отряд (${act.length}/5)</h2><div class="armyline">Сражается в бою. Порядок в списке — расстановка на поле: сверху вниз (в вертикальном поле — слева направо). Меняйте стрелками ↑↓.</div>`;
   if(msg) html+=`<div class="armyline" style="color:var(--good);margin-bottom:6px;">${msg}</div>`;
   if(leadershipExcess()>0) html+=`<div class="armyline" style="color:var(--bad);margin-bottom:6px;">⚠️ Лидерство превышено на ${leadershipExcess()} (${leadershipUsed()}/${leadershipMax()}). В начале каждого боя шанс бунта ${mutinyChancePct()}%: к врагу перейдут ${mutinyText(mutinyPlan())}. Уволите лишних — риск исчезнет.</div>`;
   if(act.length===0) html+=`<div class="armyline">Пусто — в бой пойти будет не с кем!</div>`;
@@ -1918,7 +1969,7 @@ function splitStack(armyId){
   if(!slot){ renderArmyView('⚠️ Нет свободного слота (5 актив + 5 резерв заняты) — разделить некуда.'); return; }
   const input=document.getElementById('split_'+a.id);
   let qty=Math.max(1,Math.min(have-1, parseInt(input?.value)||1));
-  const moveHp=qty*u.hp; a.hp-=moveHp; a.max-=moveHp;
+  const moveHp=qty*u.hp; a.hp-=moveHp; a.max=Math.max(a.hp,(a.max||0)-moveHp);
   army.push({id:Date.now()+Math.random(),key:a.key,hp:moveHp,max:moveHp,zone:slot});
   renderArmyView(`Выделено ${qty} × ${u.name} в новый отряд (${slot==='active'?'актив':'резерв'}).`);
 }
@@ -1938,7 +1989,10 @@ function bUnit(s){ return UNITS[s.key]; }
 function bCount(s){ return Math.max(1,Math.ceil(s.hp/bUnit(s).hp)); }
 function bOccupied(r,c){ return isObst(r,c)||stacks.some(s=>s.hp>0&&s.row===r&&s.col===c); }
 function bLog(t){ logLines.push(t); if(logLines.length>60) logLines.shift(); }
-function syncArmyFromBattle(){ stacks.filter(s=>s.side==='player').forEach(s=>{ const a=army.find(x=>x.id===s.armyId); if(a) a.hp=s.hp; }); }
+function syncArmyFromBattle(){
+  // «Размножение» в бою добавляет новых бойцов насовсем — максимум армии растёт вместе с ним
+  stacks.filter(s=>s.side==='player').forEach(s=>{ const a=army.find(x=>x.id===s.armyId); if(a){ a.hp=s.hp; a.max=Math.max(a.max||0,s.maxHp||0,a.hp); } });
+}
 function beginBattle(enc){
   // превышение лидерства — сначала предупреждение (до броска удачи испытания, чтобы отказ не тратил попытку)
   if(leadershipExcess()>0&&!enc._mutinyOk){ openMutinyWarning(enc); return; }
@@ -1948,7 +2002,8 @@ function beginBattle(enc){
   logLines=[]; battleOver=false; showTip('battle');
   lastBattleEnemyPower=power(enc.enemies,false);
   const mine=activeStacks(), prows=bSlotRows(mine.length);
-  stacks=mine.map((a,i)=>({id:'p'+a.id,side:'player',key:a.key,hp:a.hp,startHp:a.hp,maxHp:a.max,row:prows[i],col:0,armyId:a.id}));
+  normalizeArmy();
+  stacks=mine.map((a,i)=>({id:'p'+a.id,side:'player',key:a.key,hp:a.hp,startHp:a.hp,maxHp:Math.max(a.max,a.hp),row:prows[i],col:0,armyId:a.id}));
   const erows=bSlotRows(enc.enemies.length);
   enc.enemies.forEach((e,i)=>{ const hp=e.count*UNITS[e.key].hp; stacks.push({id:'e'+i,side:'enemy',key:e.key,hp:hp,maxHp:hp,row:erows[i],col:BF_COLS-1}); });
   bfx=[]; bVis={}; bObst=[]; bScene=makeBattleScene(enc); bObst=genObstacles(bScene);
@@ -1958,7 +2013,7 @@ function beginBattle(enc){
   showView('battle');
   bProcessTurn();
 }
-function bBuildOrder(){ order=stacks.filter(s=>s.hp>0).slice().sort((a,b)=>bUnit(b).speed-bUnit(a).speed); idx=0; }
+function bBuildOrder(){ order=stacks.filter(s=>s.hp>0).slice().sort((a,b)=>bSpeed(b)-bSpeed(a)); idx=0; }
 function bProcessTurn(){
   if(battleOver) return;
   while(idx<order.length && !stacks.find(s=>s.id===order[idx].id && s.hp>0)) idx++;
@@ -2087,7 +2142,12 @@ function doAttack(att,def,fxDelay){
 function aiAct(stack){
   if(battleOver) return;
   if(stack.key!=='dragon' && stack.hp<stack.maxHp*0.3 && R()<0.4){
-    stack.hp=0; stack.fled=true;
+    // бегство: отряд убегает за край поля со своей стороны — видно, что он сбежал, а не погиб
+    const r0=stack.row, c0=stack.col, path=[{row:r0,col:c0}];
+    for(let c=c0+1;c<=BF_COLS;c++) path.push({row:r0,col:Math.min(c,BF_COLS+0.6)});
+    if(path[path.length-1].col<BF_COLS+0.6) path.push({row:r0,col:BF_COLS+0.6});
+    stack.hp=0; stack.fled=true; stack.movePath=path; stack.col=BF_COLS+0.6;
+    fxPush({type:'float',r:r0,c:c0,text:'🏃 бежит!',color:'#ffe08a',dur:1200});
     bLog(`🏃 «${bUnit(stack).name}» в панике бежит с поля боя!`);
     renderBattle(); bEndTurn(); return;
   }
@@ -2112,7 +2172,9 @@ function aiAct(stack){
 }
 function dist(a,b){ return Math.max(Math.abs(a.row-b.row),Math.abs(a.col-b.col)); }
 /* Дальность хода отряда: половина скорости, не меньше 1. */
-function bMoveRange(stack){ return Math.max(1,Math.round(bUnit(stack).speed/2)); }
+/* Скорость с учётом «Ускорения»: +4 скорости = +2 клетки хода и место раньше в очереди, до конца боя. */
+function bSpeed(stack){ return bUnit(stack).speed+(stack.haste?4:0); }
+function bMoveRange(stack){ return Math.max(1,Math.round(bSpeed(stack)/2)); }
 /* Поиск пути в бою: отряд идёт по свободным клеткам (8 направлений), сквозь войска и препятствия не проходит,
    по диагонали между двумя занятыми клетками не протискивается. bReach — куда можно дойти за ход (с путями). */
 const DIRS8B=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
@@ -2173,17 +2235,20 @@ function castSpell(k){
   if(battleOver||view!=='battle') return;
   const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
   if(!cur||cur.side!=='player'||!spellCharges[k]) return;
+  if(k==='haste'&&cur.haste){ bLog(`💨 «${bUnit(cur).name}» уже ускорены.`); renderBattle(); return; }
   spellCharges[k]--; stats.spellsCast++;
   if(k==='heal'){
-    const heal=Math.round(cur.maxHp*0.3); cur.hp=Math.min(cur.maxHp,cur.hp+heal); fxSpell(cur,'✨','+'+heal,'#8dff8a');
-    bLog(`✨ Исцеление: +${heal} «${bUnit(cur).name}»`); renderBattle(); bEndTurn();
+    // лечит до 30% полного здоровья отряда, но не выше полного и никогда не уменьшает
+    const before=cur.hp, full=Math.max(cur.maxHp,cur.hp); cur.hp=Math.max(cur.hp,Math.min(full,cur.hp+Math.round(full*0.3)));
+    const healed=cur.hp-before; fxSpell(cur,'✨',healed>0?'+'+healed:'полон','#8dff8a');
+    bLog(healed>0?`✨ Исцеление: +${healed} «${bUnit(cur).name}»`:`✨ Исцеление: «${bUnit(cur).name}» и так полностью здоровы.`); renderBattle(); bEndTurn();
   } else if(k==='fireball'){
     const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
     if(enemies.length){ enemies.sort((a,b)=>b.hp-a.hp); const t=enemies[0]; t.hp-=30; fxSpell(t,'🔥','-30','#ffb14a');
       bLog(`🔥 Огненный шар: -30 «${bUnit(t).name}»`);
       if(t.hp<=0){ t.hp=0; bLog(`☠️ «${bUnit(t).name}» уничтожены!`); } }
     renderBattle(); bEndTurn();
-  } else if(k==='haste'){ fxSpell(cur,'💨'); bLog(`💨 Ускорение: «${bUnit(cur).name}» получает доп. ход!`); renderBattle(); }
+  } else if(k==='haste'){ cur.haste=true; fxSpell(cur,'💨','+2 хода','#aee7ff'); bLog(`💨 Ускорение: «${bUnit(cur).name}» до конца боя ходят на ${bMoveRange(cur)} кл. и действуют раньше. Ход не потрачен.`); renderBattle(); }
   else if(k==='multiply'){
     const mult=1.25+R()*0.25;
     const before=Math.ceil(cur.hp/bUnit(cur).hp);
@@ -2272,15 +2337,45 @@ function bfCanvas(){
   const host=document.getElementById('battlefield');
   let cv=host.querySelector('canvas');
   if(!cv){ host.innerHTML=''; cv=document.createElement('canvas'); host.appendChild(cv);
-    cv.addEventListener('click',e=>{ const b=cv.getBoundingClientRect(), O=bOrient(), cell=b.width/(O.SC+2*BF_M);
-      const sx=Math.floor((e.clientX-b.left)/cell-BF_M), sy=Math.floor((e.clientY-b.top)/cell-BF_M);
-      if(sx<0||sy<0||sx>=O.SC||sy>=O.SR) return;
-      const r=O.vert?sx:sy, c=O.vert?BF_COLS-1-sy:sx; cellClick(r,c); }); }
+    cv.addEventListener('click',e=>{ const p=bCellFromEvent(cv,e); if(p) cellClick(p.r,p.c); });
+    // компьютер: курсор подсказывает действие (на телефоне наведения нет — ничего не меняется)
+    cv.addEventListener('mousemove',e=>{ const p=bCellFromEvent(cv,e); cv.style.cursor=p?bHoverCursor(p.r,p.c):'default'; });
+    cv.addEventListener('mouseleave',()=>{ cv.style.cursor='default'; }); }
   return cv;
 }
 /* Ориентация поля: в горизонтали армии слева (вы) и справа (враг); в вертикали поле повёрнуто —
    вы внизу, враг вверху, клетки крупнее. Логические координаты (row, col) не меняются, переводится только картинка. */
 function bOrient(){ const vert=!document.body.classList.contains('land'); return {vert, SC:vert?BF_ROWS:BF_COLS, SR:vert?BF_COLS:BF_ROWS}; }
+function bCellFromEvent(cv,e){
+  const b=cv.getBoundingClientRect(), O=bOrient(), cell=b.width/(O.SC+2*BF_M);
+  const sx=Math.floor((e.clientX-b.left)/cell-BF_M), sy=Math.floor((e.clientY-b.top)/cell-BF_M);
+  if(sx<0||sy<0||sx>=O.SC||sy>=O.SR) return null;
+  return {r:O.vert?sx:sy, c:O.vert?BF_COLS-1-sy:sx};
+}
+/* Курсоры-подсказки: рисуются один раз из эмодзи в картинку 32×32 (горячая точка — центр). */
+const CURSOR_CACHE={};
+function emojiCursor(name,emoji,badge,fallback){
+  if(CURSOR_CACHE[name]) return CURSOR_CACHE[name];
+  const cv=document.createElement('canvas'); cv.width=32; cv.height=32; const g=cv.getContext('2d');
+  g.textAlign='center'; g.textBaseline='middle'; g.font='24px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; g.fillStyle='#000';
+  g.fillText(emoji,16,17);
+  if(badge){ g.font='13px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; g.fillText(badge,25,25); }
+  return CURSOR_CACHE[name]=`url(${cv.toDataURL('image/png')}) 16 16, ${fallback}`;
+}
+function bHoverCursor(r,c){
+  if(battleOver||view!=='battle') return 'default';
+  const cur=order[idx]&&stacks.find(s=>s.id===order[idx].id&&s.hp>0);
+  if(!cur||cur.side!=='player') return 'default';
+  const t=stacks.find(s=>s.hp>0&&s.row===r&&s.col===c);
+  if(t&&t.side==='enemy'){
+    const u=bUnit(cur), d=dist(cur,t);
+    if(u.ranged&&d>1) return shotCovered(cur,t)?emojiCursor('shotCover','🎯','🛡️','crosshair'):emojiCursor('shot','🎯','','crosshair');
+    if(d<=1||bApproachCell(cur,t)) return emojiCursor('melee','⚔️','','pointer');
+    return 'not-allowed';
+  }
+  if(!t){ const reach=bReach(cur); if(reach.has(r+','+c)&&!(r===cur.row&&c===cur.col)) return 'pointer'; }
+  return 'default';
+}
 function easeIO(p){ return p<0.5?2*p*p:1-2*(1-p)*(1-p); }
 function drawBattleCanvas(now){
   if(!bScene) return false;
@@ -2382,7 +2477,11 @@ function drawBattleCanvas(now){
       v.r=v.path[i].row+(v.path[i+1].row-v.path[i].row)*t; v.c=v.path[i].col+(v.path[i+1].col-v.path[i].col)*t; p=q; if(q>=1) v.path=null;
     } else { p=Math.min(1,(now-v.t0)/240); const e=easeIO(p); v.r=v.fr+(v.tr-v.fr)*e; v.c=v.fc+(v.tc-v.fc)*e; }
     if(p<1) active=true;
-    if(s.hp<=0){ if(v.deadAt===undefined) v.deadAt=now+260; } else v.deadAt=undefined;
+    // пока анимация удара ещё не долетела, отряд выглядит как до удара
+    v.pendingHit=bfx.some(f=>f.type==='hit'&&f.id===s.id&&now<f.t0);
+    const running=s.fled&&v.path; // бегущий отряд показываем с числом бойцов, пока не скроется за краем
+    if(v.shownN===undefined||(!v.pendingHit&&!running)){ v.shownN=s.hp>0?bCount(s):0; v.shownHp=Math.max(0,s.hp); }
+    if(s.hp<=0){ if(v.deadAt===undefined&&!v.pendingHit&&!running) v.deadAt=now+(s.fled?0:180); } else v.deadAt=undefined;
     let ox=0, oy=0;
     bfx.forEach(f=>{ if(f.id!==s.id||now<f.t0) return; const q=(now-f.t0)/f.dur; if(q>1) return;
       if(f.type==='lunge'){ const k=Math.sin(Math.PI*q)*0.32; ox+=f.dc*k; oy+=f.dr*k; }
@@ -2393,7 +2492,7 @@ function drawBattleCanvas(now){
   const fs=Math.round(cell*0.56);
   stacks.slice().sort((a,b)=>PY(pos[a.id].r,pos[a.id].c)-PY(pos[b.id].r,pos[b.id].c)).forEach(s=>{
     const v=bVis[s.id]; let alpha=1;
-    if(s.hp<=0){ const q=(now-v.deadAt)/500; if(q>=1) return; active=true; alpha=Math.max(0,1-Math.max(0,q)); }
+    if(s.hp<=0){ active=true; if(v.deadAt!==undefined){ const q=(now-v.deadAt)/500; if(q>=1) return; alpha=Math.max(0,1-Math.max(0,q)); } }
     const cx=PX(pos[s.id].r,pos[s.id].c)+cell/2, cy=PY(pos[s.id].r,pos[s.id].c)+cell/2, u=bUnit(s), team=s.side==='player'?'#4d84c4':'#c0463f';
     g.globalAlpha=alpha;
     g.fillStyle='rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(cx+cell*0.04,cy+cell*0.3,cell*0.36,cell*0.12,0,0,Math.PI*2); g.fill();
@@ -2412,15 +2511,18 @@ function drawBattleCanvas(now){
     g.drawImage(fig,cx-cs/2,cy+cell*0.24-cs*(0.78+SPR_H-1),cs,cs*SPR_H);
     g.textAlign='center'; g.textBaseline='middle';
     if(hit){ g.fillStyle=`rgba(255,60,40,${0.45*(1-(now-hit.t0)/hit.dur)})`; g.beginPath(); g.arc(cx,cy-cell*0.04,cell*0.33,0,Math.PI*2); g.fill(); }
-    // число бойцов
-    const n=String(bCount(s)), pw=Math.max(cell*0.3,cell*0.13*n.length+cell*0.12), ph=cell*0.24, px=cx+cell*0.42-pw, py=cy+cell*0.12;
+    if(s.haste&&s.hp>0){ g.textAlign='center'; g.textBaseline='middle'; g.font=`${Math.round(cell*0.24)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; g.fillStyle='#000'; g.fillText('💨',cx-cell*0.34,cy+cell*0.22); }
+    // число бойцов и здоровье — по «видимому» состоянию; у погибшего отряда их нет, тает только фигура
+    if(v.shownN>0){
+    const n=String(v.shownN), pw=Math.max(cell*0.3,cell*0.13*n.length+cell*0.12), ph=cell*0.24, px=cx+cell*0.42-pw, py=cy+cell*0.12;
     g.fillStyle=s.side==='player'?'#2c5a8f':'#8f2d28'; pathRoundRect(g,px,py,pw,ph,[ph/2,ph/2,ph/2,ph/2]); g.fill();
     g.strokeStyle='rgba(255,255,255,0.6)'; g.lineWidth=1; g.stroke();
     g.fillStyle='#fff'; g.font=`bold ${Math.round(cell*0.17)}px sans-serif`; g.fillText(n,px+pw/2,py+ph/2+0.5);
     // здоровье отряда
-    const hpF=Math.max(0,Math.min(1,s.hp/(s.maxHp||1))), bw=cell*0.62, bx=cx-bw/2, by=cy+cell*0.4;
+    const hpF=Math.max(0,Math.min(1,v.shownHp/(s.maxHp||1))), bw=cell*0.62, bx=cx-bw/2, by=cy+cell*0.4;
     g.fillStyle='rgba(0,0,0,0.55)'; g.fillRect(bx,by,bw,Math.max(2,cell*0.05));
     g.fillStyle=hpF>0.5?'#6fd36a':hpF>0.25?'#e8c547':'#e5534b'; g.fillRect(bx,by,bw*hpF,Math.max(2,cell*0.05));
+    }
     g.globalAlpha=1;
   });
   // эффекты: выстрелы, всплески, всплывающие числа
@@ -3261,10 +3363,10 @@ document.getElementById('waitBtn').onclick=()=>{
    отношение скоростей в пределах ×0,5…×2: от медленных врагов уходят почти без потерь, от быстрых — дорого. */
 function retreatPlan(){
   const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
-  const fastest=enemies.reduce((m,s)=>Math.max(m,bUnit(s).speed),0);
+  const fastest=enemies.reduce((m,s)=>Math.max(m,bSpeed(s)),0);
   const base=hardMode?0.4:0.2;
   return stacks.filter(s=>s.side==='player'&&s.hp>0).map(s=>{
-    const u=bUnit(s), cnt=bCount(s), ratio=Math.max(0.5,Math.min(2,fastest/Math.max(1,u.speed)));
+    const u=bUnit(s), cnt=bCount(s), ratio=Math.max(0.5,Math.min(2,fastest/Math.max(1,bSpeed(s))));
     const lost=Math.min(cnt,Math.round(cnt*base*ratio));
     return {s,u,cnt,lost,ratio};
   });
@@ -3542,8 +3644,13 @@ document.getElementById('miniBtn').onclick=openMinimap;
    После выполнения город даёт новое поручение через 2 дня. Цели отмечены ❗ на карте и кольцом на мини-карте. */
 const MAX_QUESTS=3;
 function activeQuests(){ return allPois().filter(p=>p.type==='city'&&p.quest&&p.quest.status==='active').map(p=>p.quest); }
+/* Цель охоты — сам отряд (uid), а не клетка: бродячие отряды уходят с места. Старые поручения — по клетке. */
+function huntTarget(q){ return pois.find(x=>x.type==='lair'&&(q.lairUid?x.uid===q.lairUid:(x.r===q.tr&&x.c===q.tc))); }
+function huntCleared(q){ const l=huntTarget(q); return !l||!!visited[key(l.r,l.c)+':lair']; }
+function huntQuests(){ return allPois().filter(p=>p.type==='city'&&p.quest&&p.quest.type==='hunt'&&p.quest.cont===curCont&&(p.quest.status==='offered'||p.quest.status==='active')).map(p=>p.quest); }
 function questTargetPos(q){
-  if(q.type==='hunt'||q.type==='treasure') return {r:q.tr,c:q.tc};
+  if(q.type==='hunt'){ const l=huntTarget(q); return l?{r:l.r,c:l.c}:{r:q.tr,c:q.tc}; }
+  if(q.type==='treasure') return {r:q.tr,c:q.tc};
   if(q.type==='courier'){ const w=worlds[q.cont]; const d=w&&(w===worlds[curCont]?pois:w.pois).find(p=>p.type==='city'&&p.name===q.dest); return d?{r:d.r,c:d.c}:null; }
   return null;
 }
@@ -3556,14 +3663,17 @@ function drawQuestBadge(g,x,y,T){
   g.fillStyle='#3a2a10'; g.font=`bold ${Math.round(rr*1.4)}px sans-serif`; g.textAlign='center'; g.textBaseline='middle'; g.fillText('!',cx,cy+0.5);
 }
 function makeQuest(city){
-  const lairs=pois.filter(p=>p.type==='lair'&&poiAt(p.r,p.c)===p&&!activeQuests().some(q=>q.type==='hunt'&&q.cont===curCont&&q.tr===p.r&&q.tc===p.c));
+  // одно логово — не больше чем в одном поручении (и предложенном, и взятом)
+  const taken=new Set(huntQuests().map(huntTarget).filter(Boolean));
+  const lairs=pois.filter(p=>p.type==='lair'&&poiAt(p.r,p.c)===p&&!taken.has(p));
   const others=pois.filter(p=>p.type==='city'&&p!==city);
   const types=[]; if(lairs.length) types.push('hunt','hunt'); if(others.length) types.push('courier'); types.push('treasure');
   const type=types[Math.floor(R()*types.length)];
   if(type==='hunt'){
     lairs.sort((a,b)=>chebyshev(a,city)-chebyshev(b,city)); const t=lairs[Math.floor(R()*Math.min(4,lairs.length))];
     const pow=power(t.enemies,false);
-    return {type,cont:curCont,city:city.name,tr:t.r,tc:t.c,target:t.name,gold:Math.round(pow*0.9+60),exp:Math.round(pow/4)+15,
+    if(!t.uid) t.uid='L'+Date.now().toString(36)+Math.floor(Math.random()*1e6).toString(36);
+    return {type,cont:curCont,city:city.name,tr:t.r,tc:t.c,lairUid:t.uid,target:t.name,gold:Math.round(pow*0.9+60),exp:Math.round(pow/4)+15,
       text:`Разбейте «${t.name}» — они разоряют окрестности ${city.name}.`};
   }
   if(type==='courier'){
@@ -3583,6 +3693,10 @@ function makeQuest(city){
 }
 function cityQuestHtml(p){
   if(p.type!=='city') return '';
+  let thanks='';
+  if(p.quest&&p.quest.status==='offered'&&p.quest.type==='hunt'&&huntCleared(p.quest)){
+    thanks=completeQuest(p.quest,'вы уже разогнали их, не дожидаясь просьбы');
+  }
   if((!p.quest||p.quest.status==='done') && (p.questReady||0)<=day){ const q=makeQuest(p); if(q){ q.status='offered'; p.quest=q; } }
   const q=p.quest;
   let body='';
@@ -3592,7 +3706,7 @@ function cityQuestHtml(p){
     body=`<div class="armyline" style="color:var(--text)">${q.text}</div><div class="armyline">Награда: ${q.gold}💰, ${q.exp} опыта${q.item?', возможно — снаряжение':''}</div>
       ${full?`<div class="armyline" style="color:var(--bad)">У вас уже ${MAX_QUESTS} поручения — сначала выполните одно.</div>`:`<button onclick="acceptQuest()">Взяться</button>`}`;
   } else body=`<div class="armyline" style="color:var(--text)">${q.text}</div><div class="armyline" style="color:var(--accent)">Выполняется — цель отмечена ❗ на карте и кольцом на мини-карте 🧭.</div>`;
-  return `<div class="cityCard"><h2>📜 Поручение</h2>${body}</div>`;
+  return `<div class="cityCard"><h2>📜 Поручение</h2>${thanks?`<div class="armyline" style="color:var(--good);margin-bottom:6px;">🎉 ${thanks}</div>`:''}${body}</div>`;
 }
 function acceptQuest(){
   const p=curCity; if(!p||!p.quest||p.quest.status!=='offered'||activeQuests().length>=MAX_QUESTS) return;
@@ -3612,7 +3726,7 @@ function completeQuest(q,where){
   return `📜 Поручение города ${q.city} выполнено${where?' — '+where:''}! +${q.gold}💰, +${q.exp} опыта${extra}.`;
 }
 function questOnLairCleared(lair){
-  const q=activeQuests().find(q=>q.type==='hunt'&&q.cont===curCont&&q.tr===lair.r&&q.tc===lair.c);
+  const q=activeQuests().find(q=>q.type==='hunt'&&q.cont===curCont&&(q.lairUid?q.lairUid===lair.uid:(q.tr===lair.r&&q.tc===lair.c)));
   return q?completeQuest(q,`«${lair.name}» больше не опасны`):'';
 }
 function openQuestLog(){
@@ -4008,6 +4122,7 @@ function restoreGame(json){
   heroClass=HERO_CLASSES[d.heroClass]?d.heroClass:'classic';
   challenge=d.challenge||null; setStream('d|'+(d.day||1)+'|load');
   // старые сохранения не знали о бонусах ритуальных предметов — выдаём положенное за уже найденные
+  normalizeArmy(); // сохранения, где максимум отряда отстал от здоровья
   ritualGranted=typeof d.ritualGranted==='number'?d.ritualGranted:0; ritualSetDone=!!d.ritualSetDone;
   applyRitualBonuses();
   stats=Object.assign(freshStats(),d.stats||{});
