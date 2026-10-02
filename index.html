@@ -161,6 +161,9 @@
   *{-webkit-tap-highlight-color:transparent;}
   #map, #map canvas, #battlefield, #battlefield canvas, #hud, #controls{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
   button{-webkit-user-select:none; user-select:none;}
+
+  .infoBtn{width:22px; height:22px; min-width:22px; padding:0 !important; border-radius:50% !important; font-family:Georgia,serif; font-style:italic;
+    font-weight:bold !important; font-size:13px !important; line-height:20px; vertical-align:middle; margin:0 2px;}
 </style>
 </head>
 <body>
@@ -251,7 +254,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.19.2', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.19.4', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -1287,7 +1290,7 @@ function power(items,isArmy){
 function lairWilling(lair){ return power(army,true)>power(lair.enemies,false)*1.6; }
 function startEncounter(lair,caught){
   const enemyPow=power(lair.enemies,false), armyPow=power(army,true), ratio=enemyPow/Math.max(1,armyPow);
-  const comp=lair.enemies.map(e=>`${UNITS[e.key].emoji} ${UNITS[e.key].name}×${e.count}`).join(', ');
+  const comp=lair.enemies.map(e=>`${UNITS[e.key].emoji} ${UNITS[e.key].name}×${e.count}${infoBtn(e.key,e.count)}`).join(', ');
   const verdict=ratio<0.6?'<span style="color:var(--good)">заметно слабее вас</span>':ratio<1.1?'<span style="color:var(--accent)">примерно равны вам</span>':'<span style="color:var(--bad)">сильнее вас</span>';
   const willing=lairWilling(lair), cost=Math.max(50,Math.round(enemyPow*2.5));
   setInfo(`${lair.emoji} <b>${lair.name}</b>${caught?' настигает вас!':''}<br>${comp} — ${verdict}.<br>
@@ -1321,7 +1324,7 @@ function joinAccept(r,c,cost){
 function joinDecline(r,c){ const lair=pois.find(p=>p.r===r&&p.c===c); curEncounter={type:'lair',ref:lair}; beginBattle(lair); }
 /* Панель осады: остаётся на экране после обстрела — результат выстрела сверху, кнопки на месте. */
 function showSiege(p,msg){
-  const gsum=p.garrison.map(e=>`${UNITS[e.key].emoji}×${e.count}`).join(' ');
+  const gsum=p.garrison.map(e=>`${UNITS[e.key].emoji}×${e.count}${infoBtn(e.key,e.count)}`).join(' ');
   const wallLine=p.wallHp>0?`🧱 Стены: ${p.wallHp}/${p.wallMax} (защитники +3 к защите)`:`🧱 Стены разрушены — защитники без бонуса.`;
   const head=p.type==='governor'?`👑 <b>${p.name}</b> теперь враждебен после получения награды!`:`🏴 <b>${p.name}</b> — правит <b>${p.lord}</b>.`;
   const atk=p.type==='governor'?`attackGovernor(${p.r},${p.c})`:`attackCity(${p.r},${p.c})`;
@@ -1723,7 +1726,7 @@ function renderCity(msg){
   p.recruit.forEach(r=>{
     const u=UNITS[r.key];
     const out=r.stock<=0;
-    html+=`<div class="row"><span>${unitImg(r.key)}${u.name} — ${r.cost}💰/шт (в запасе: ${r.stock}/${r.maxStock})<br><span style="color:var(--muted)">лид. ${u.leadershipCost}, содержание ${u.upkeep}💰/нед</span></span>
+    html+=`<div class="row"><span>${unitImg(r.key)}${u.name}${infoBtn(r.key)} — ${r.cost}💰/шт (в запасе: ${r.stock}/${r.maxStock})<br><span style="color:var(--muted)">лид. ${u.leadershipCost}, содержание ${u.upkeep}💰/нед</span></span>
       <span class="rowbtns"><button onclick="recruitUnit(${p.r},${p.c},'${r.key}',1)" ${out?'disabled':''}>+1</button><button onclick="recruitUnit(${p.r},${p.c},'${r.key}',5)" ${out?'disabled':''}>+5</button></span></div>`;
   });
   html+=`</div>`;
@@ -1741,7 +1744,7 @@ function renderCity(msg){
     if(owned.length===0) html+=`<div class="armyline">Нечего продавать.</div>`;
     owned.forEach(a=>{
       const u=UNITS[a.key], sp=sellPrice(a.key), cnt=Math.ceil(a.hp/u.hp);
-      html+=`<div class="row"><span>${unitImg(a.key)}${u.name} ×${cnt} — ${sp}💰/шт</span>
+      html+=`<div class="row"><span>${unitImg(a.key)}${u.name}${infoBtn(a.key,cnt)} ×${cnt} — ${sp}💰/шт</span>
         <span class="rowbtns"><button class="secondary" onclick="sellUnit('${a.id}',1)">-1</button><button class="secondary" onclick="sellUnit('${a.id}',5)">-5</button></span></div>`;
     });
     html+=`</div>`;
@@ -1807,7 +1810,7 @@ function openArmyView(){ if(view==='battle') return; showView('army'); renderArm
 function renderArmyStackRow(a){
   const u=UNITS[a.key], cnt=Math.ceil(a.hp/u.hp);
   const targetZone=a.zone==='active'?'резерв':'актив';
-  return `<div class="row" style="flex-wrap:wrap;"><span>${unitImg(a.key)}<b>${u.name}</b> ×${cnt} (hp ${a.hp}/${a.max}, лид. ${cnt*u.leadershipCost})</span>
+  return `<div class="row" style="flex-wrap:wrap;"><span>${unitImg(a.key)}<b>${u.name}</b>${infoBtn(a.key,cnt)} ×${cnt} (hp ${a.hp}/${a.max}, лид. ${cnt*u.leadershipCost})</span>
       <span class="rowbtns"><button class="secondary" onclick="switchZone('${a.id}')">→ ${targetZone}</button></span></div>
       <div class="row" style="padding-top:0;">
         <span style="font-size:12px;color:var(--muted);">Разделить: <input type="number" id="split_${a.id}" min="1" max="${cnt-1||0}" value="1" style="width:48px;"> шт</span>
@@ -1961,8 +1964,15 @@ function onVictory(){
 }
 function onDefeat(){
   bLog('💀 Отряд разбит и отступает...');
-  track('battle',{res:'loss',kind:curEncounter&&curEncounter.type,pow:lastBattleEnemyPower}); setTimeout(()=>showTip('defeat'),1500);
+  track('battle',{res:'loss',kind:curEncounter&&curEncounter.type,pow:lastBattleEnemyPower});
   stats.battlesLost++; battleCasualties();
+  // жёсткий режим (и испытание недели): проигранный бой — конец игры
+  if(hardMode){
+    const foe=curEncounter&&curEncounter.ref&&curEncounter.ref.name?`у «${curEncounter.ref.name}»`:'в бою';
+    setTimeout(()=>triggerGameOver(`Армия разбита ${foe}. В жёстком режиме поражение в бою окончательно.`),1300);
+    return;
+  }
+  setTimeout(()=>showTip('defeat'),1500);
   currentWallBonus=0;
   army.forEach(a=>a.hp=Math.round(a.max*0.5));
   gold=Math.round(gold*0.7); updateHud();
@@ -3146,16 +3156,46 @@ document.getElementById('waitBtn').onclick=()=>{
   const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
   if(cur&&cur.side==='player'){ bLog(`${bUnit(cur).emoji} «${bUnit(cur).name}» пропускает ход`); bEndTurn(); }
 };
-document.getElementById('retreatBtn').onclick=()=>{
+/* Отступление с потерями, зависящими от скорости: чем быстрее самый быстрый из живых врагов по сравнению с отрядом,
+   тем больше бойцов отряд теряет при бегстве. Базовая доля — 20% (жёсткий режим — 40%), умножается на
+   отношение скоростей в пределах ×0,5…×2: от медленных врагов уходят почти без потерь, от быстрых — дорого. */
+function retreatPlan(){
+  const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
+  const fastest=enemies.reduce((m,s)=>Math.max(m,bUnit(s).speed),0);
+  const base=hardMode?0.4:0.2;
+  return stacks.filter(s=>s.side==='player'&&s.hp>0).map(s=>{
+    const u=bUnit(s), cnt=bCount(s), ratio=Math.max(0.5,Math.min(2,fastest/Math.max(1,u.speed)));
+    const lost=Math.min(cnt,Math.round(cnt*base*ratio));
+    return {s,u,cnt,lost,ratio};
+  });
+}
+function confirmRetreat(){
   if(battleOver||view!=='battle') return;
   const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
   if(!cur||cur.side!=='player') return;
+  const plan=retreatPlan(), total=plan.reduce((a,p)=>a+p.lost,0);
+  const rows=plan.map(p=>`<div class="row"><span>${unitImg(p.s.key)}${p.u.name} ×${p.cnt}<br><span style="color:var(--muted);font-size:11.5px;">${p.ratio>1.05?'враги быстрее — уйти трудно':p.ratio<0.95?'враги медленнее — уйти легко':'скорость равна'}</span></span><b style="color:${p.lost?'var(--bad)':'var(--good)'}">${p.lost?'−'+p.lost:'без потерь'}</b></div>`).join('');
+  openModal(`<h2>🏳️ Отступить?</h2>
+    <div class="modalNote">Прикрывая бегство, армия потеряет часть бойцов. Чем быстрее враг, тем дороже уйти.${hardMode?' В жёстком режиме потери вдвое больше.':''}</div>
+    ${rows}
+    <div class="modalNote" style="color:var(--text);margin-top:6px;">Всего потерь: <b>${total}</b>. Трофеев не будет.</div>
+    <button style="width:100%;margin-top:10px;" onclick="closeModal();doRetreat()">🏳️ Отступить</button>
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeModal()">⚔️ Продолжить бой</button>`);
+}
+function doRetreat(){
+  if(battleOver||view!=='battle') return;
+  const plan=retreatPlan();
   battleOver=true; syncArmyFromBattle();
   stats.retreats++; battleCasualties();
-  track('battle',{res:'retreat',kind:curEncounter&&curEncounter.type,pow:lastBattleEnemyPower});
-  bLog('🏳️ Отряд отступает с поля боя!'); renderBattle();
-  setTimeout(()=>{ showView('map'); renderMap(); setInfo('🏳️ Вы отступили без потерь армии, но без трофеев.'); },1000);
-};
+  const parts=[];
+  plan.forEach(p=>{ if(!p.lost) return; const a=army.find(x=>x.id===p.s.armyId); if(!a) return;
+    const left=Math.max(0,p.cnt-p.lost); a.hp=Math.min(a.hp,left*p.u.hp); stats.troopsLost+=p.lost; parts.push(`${p.u.name} −${p.lost}`); });
+  army=army.filter(a=>a.hp>0);
+  track('battle',{res:'retreat',kind:curEncounter&&curEncounter.type,pow:lastBattleEnemyPower,lost:plan.reduce((a,p)=>a+p.lost,0)});
+  bLog('🏳️ Отряд отступает с поля боя!'); renderBattle(); updateHud();
+  setTimeout(()=>{ showView('map'); renderMap(); setInfo(parts.length?`🏳️ Вы отступили. Потери при бегстве: ${parts.join(', ')}.`:'🏳️ Вы отступили без потерь — враги не успели догнать.'); },1000);
+}
+document.getElementById('retreatBtn').onclick=confirmRetreat;
 /* ================= MENU / MODAL ================= */
 let modalLocked=false;
 function openModal(html,locked){
@@ -3313,7 +3353,7 @@ const TIPS={
   day:'Ходы на сегодня кончились — нажмите <b>⏭️ День</b>. Каждое утро игра сохраняется сама.',
   workers:'Лес, скалы и воду убирают <b>работники</b>: 🪓 Лесоруб, ⛏️ Камнетёс, 🔨 Плотник. Нанимают их в гильдиях некоторых городов.',
   city:'В городе можно <b>нанять войска</b> и взять <b>поручение</b>. Размер армии ограничен <b>лидерством</b> 👥. В разных городах продаётся разное — всё увиденное записывается в 📖 Справочник (меню ☰).',
-  battle:'<b>Бой.</b> Отряд, чей ход, подсвечен золотым кольцом. Нажмите на клетку, чтобы пойти, или на врага в красной пунктирной обводке — отряд сам подойдёт и ударит. Стрелки бьют издалека. Можно «Ждать» или «Отступить».',
+  battle:'<b>Бой.</b> Отряд, чей ход, подсвечен золотым кольцом. Нажмите на клетку, чтобы пойти, или на врага в красной пунктирной обводке — отряд сам подойдёт и ударит. Стрелки бьют издалека. Можно «Ждать» или «Отступить» — но от быстрых врагов отступать дорого.',
   defeat:'Поражение: армия отступила в столицу и ослабла. В обычном режиме неудачу можно переиграть — меню ☰ → «Загрузить».',
   week:'Прошла неделя: города и ваши замки приносят <b>доход</b>, а армия требует <b>содержания</b>. Следите, чтобы казна не опустела.',
   castle:'Это <b>вражеский замок</b> 🏴. Захват даёт часть карты земли; все 8 частей открывают путь в следующую землю. Перед штурмом прикиньте силу гарнизона.',
@@ -3575,7 +3615,7 @@ function openChallengeHub(){
     <div class="modalNote">${wk} · ${weekRange(wk)}</div>
     <div style="display:flex;gap:10px;align-items:center;margin:8px 0;"><img alt="" src="${spriteURL('unitTok',56,'hero_'+hk+'|#4d84c4')}" style="width:48px;height:62px;">
       <div class="modalNote" style="color:var(--text)">Герой недели — <b>${h.name}, ${h.title}</b>.<br>Цель — покорить Морвейн: собрать все 8 частей карты.</div></div>
-    <div class="modalNote">Одна карта для всех, жёсткий режим: без загрузок, гибель окончательна. Удача в боях у всех одинаковая — решает тактика. Две таблицы: по игровым дням и по активному времени.</div>
+    <div class="modalNote">Одна карта для всех, жёсткий режим: без загрузок, поражение в бою окончательно. Удача в боях у всех одинаковая — решает тактика. Две таблицы: по игровым дням и по активному времени.</div>
     ${goal}${status?`<div class="modalNote" style="color:var(--text);margin-top:8px;">${status}</div>`:''}${buttons}
     <button class="secondary" style="margin-top:10px;width:100%;" onclick="openLeaderboard('days')">📊 Таблица рекордов</button>
     <button class="secondary" style="margin-top:8px;width:100%;" onclick="chalHubClose()">Закрыть</button>`);
@@ -3707,6 +3747,30 @@ function parseInvite(){
   return chalInvite;
 }
 
+/* ================= СПРАВКА О ВОЙСКАХ =================
+   Кнопка «i» рядом с отрядом — в найме, на рынке, в армии и в описании врагов. */
+const FACTION_NAMES={human:'Люди',nature:'Природа',beast:'Звери',undead:'Нежить',monster:'Чудовища'};
+function infoBtn(key,count){ return ` <button class="infoBtn secondary" title="Характеристики" onclick="event.stopPropagation();openUnitInfo('${key}',${count||0})">i</button>`; }
+function openUnitInfo(key,count){
+  const u=UNITS[key]; if(!u) return;
+  const mr=Math.max(1,Math.round(u.speed/2)), cut=Math.min(70,u.def*5);
+  const row=(ic,label,val,hint)=>`<div class="row"><span>${ic} ${label}${hint?`<br><span style="color:var(--muted);font-size:11.5px;">${hint}</span>`:''}</span><b style="white-space:nowrap;">${val}</b></div>`;
+  const squad=count>0?`<div class="modalNote" style="color:var(--text);margin-top:8px;">Отряд из ${count}: здоровье ${u.hp*count}, урон за удар ${u.dmg[0]*count}–${u.dmg[1]*count}, лидерство ${u.leadershipCost*count}, содержание ${u.upkeep*count}💰/нед.</div>`:'';
+  openModal(`<div style="display:flex;gap:12px;align-items:center;">
+      <img alt="" src="${spriteURL('fig',96,key+'|0')}" style="width:84px;height:109px;margin:-10px -6px -6px -10px;">
+      <div><h2 style="margin:0;">${u.name}</h2><div class="modalNote">${FACTION_NAMES[u.faction]||u.faction} · уровень ${'★'.repeat(u.tier)}</div></div></div>
+    <div style="margin-top:6px;">
+      ${row('❤️','Здоровье',u.hp,'на одного бойца')}
+      ${row('⚔️','Урон',`${u.dmg[0]}–${u.dmg[1]}`,'одного бойца за удар')}
+      ${row('🛡️','Защита',u.def,`снижает входящий урон на ${cut}%`)}
+      ${row('👣','Скорость',u.speed,`ход ${mr} кл., удар с подходом — до ${mr+1} кл.`)}
+      ${row(u.ranged?'🏹':'🗡️','Бой',u.ranged?'дальний':'ближний',u.ranged?'бьёт с любой дистанции; через препятствие −30%':'бьёт вплотную или подойдя')}
+      ${row('👥','Лидерство',u.leadershipCost,'за одного бойца')}
+      ${row('💰','Содержание',u.upkeep,'золота в неделю за бойца')}
+    </div>${squad}
+    <button class="secondary" style="margin-top:12px;width:100%;" onclick="closeModal()">Закрыть</button>`);
+}
+
 const GAME_INTRO=`Пять земель по 80×60 клеток, каждая опаснее предыдущей. В каждой — 5 городов и 8 замков: покорите землю целиком, чтобы открыть путь к следующей. Между землями плавают из любой пристани — корабль плывёт с вами.`;
 let pendingHero='knight';
 function openNewGame(first){
@@ -3726,7 +3790,7 @@ function openModeStep(first){
   openModal(`<h2>${h.emoji} ${h.name}, ${h.title}</h2>
     <div class="modalNote" style="margin-top:4px;color:var(--text);"><b>Выберите режим</b> — изменить его в этой партии будет нельзя:</div>
     <button class="modeBtn" onclick="beginGame(false,${first})">🛡️ Обычный<small>Автосохранение каждое утро, сохранение и загрузка в любой момент — неудачу можно переиграть.</small></button>
-    <button class="modeBtn secondary" onclick="beginGame(true,${first})">⚔️ Жёсткий<small>Игра сохраняется после каждого действия, загрузок нет. Штурм замка без армии и гибель героя необратимы.</small></button>
+    <button class="modeBtn secondary" onclick="beginGame(true,${first})">⚔️ Жёсткий<small>Игра сохраняется после каждого действия, загрузок нет. Поражение в бою и штурм замка без армии необратимы.</small></button>
     <button class="secondary" style="margin-top:10px;width:100%;" onclick="openNewGame(${first})">← Другой герой</button>`, first);
 }
 function beginGame(hard,first){
