@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Морвейн</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Philosopher:wght@400;700&display=swap" rel="stylesheet">
 <!-- SDK Telegram Mini Apps: внутри Telegram даёт CloudStorage; вне Telegram (браузер, Android WebView) просто не используется -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
@@ -172,6 +174,13 @@
 
   .tag2h{font-size:10.5px; color:#f0b45a; border:1px solid rgba(240,180,90,0.6); border-radius:4px; padding:0 4px; white-space:nowrap;}
   .tagLeg{font-size:10.5px; color:#e9c46a; white-space:nowrap;}
+
+  /* заголовки — шрифт с характером (кириллица), запасной — Georgia */
+  h1, h2, .cityCard h2, #modalCard h2, .statSection, #turnbar, #contName{font-family:'Philosopher',Georgia,serif;}
+  h1{letter-spacing:.02em;} .cityCard h2, #modalCard h2{font-weight:700;}
+  .ico{display:inline-block; width:18px; height:18px; background:center/contain no-repeat; vertical-align:-4px; margin-right:2px;}
+  button .ico{width:20px; height:20px; vertical-align:-5px; margin-right:5px;}
+  .iconBtn .ico{margin:0; width:19px; height:19px;}
 </style>
 </head>
 <body>
@@ -181,12 +190,12 @@
 <div id="hud">
   <div id="hudMain">
     <span class="stat" id="contName">Морвейн</span>
-    <span title="Золото">💰 <span class="stat" id="gold">0</span></span>
-    <span title="Ходы на сегодня">👣 <span class="stat" id="moves">0</span></span>
-    <span title="Лидерство: занято/всего">👥 <span class="stat" id="leadership">0/60</span></span>
-    <span title="День">📅 <span class="stat" id="day">1</span></span>
+    <span title="Золото"><i class="ico" data-ico="coin"></i><span class="stat" id="gold">0</span></span>
+    <span title="Ходы на сегодня"><i class="ico" data-ico="boot"></i><span class="stat" id="moves">0</span></span>
+    <span title="Лидерство: занято/всего"><i class="ico" data-ico="banner"></i><span class="stat" id="leadership">0/60</span></span>
+    <span title="День"><i class="ico" data-ico="sun"></i><span class="stat" id="day">1</span></span>
     <span class="grow"></span>
-    <button id="miniBtn" class="secondary iconBtn" title="Карта земли">🧭</button>
+    <button id="miniBtn" class="secondary iconBtn" title="Карта земли"><i class="ico" data-ico="compass"></i></button>
     <button id="hudMoreBtn" class="secondary iconBtn" title="Подробнее">▾</button>
     <button id="menuBtn" class="secondary iconBtn" title="Меню">☰</button>
   </div>
@@ -232,10 +241,10 @@
 <div id="statsView" class="hidden"></div>
 
 <div id="controls">
-  <button id="invBtn" class="secondary">🎒 Сумка</button>
-  <button id="armyBtn" class="secondary">👥 Армия</button>
-  <button id="magicBtn" class="secondary">🪄 Магия</button>
-  <button id="nextDayBtn">⏭️ День</button>
+  <button id="invBtn" class="secondary"><i class="ico" data-ico="bag"></i>Сумка</button>
+  <button id="armyBtn" class="secondary"><i class="ico" data-ico="swords"></i>Армия</button>
+  <button id="magicBtn" class="secondary"><i class="ico" data-ico="staff"></i>Магия</button>
+  <button id="nextDayBtn"><i class="ico" data-ico="hourglass"></i>День</button>
 </div>
 </div><!-- /#app -->
 
@@ -247,11 +256,13 @@
     <button id="saveBtn" class="secondary">💾 Сохранить игру</button>
     <button id="loadBtn" class="secondary">📂 Загрузить последнее сохранение</button>
     <button id="statsBtn" class="secondary">📊 Летопись похода</button>
+    <button id="achBtn" class="secondary">🏅 Достижения</button>
     <button id="challengeBtn" class="secondary">🏆 Испытание недели</button>
     <button id="questLogBtn" class="secondary">📜 Поручения</button>
     <button id="pathBtn" class="secondary">🧩 Карта пути</button>
     <button id="journalBtn" class="secondary">📖 Справочник городов</button>
     <button id="legendBtn" class="secondary">🗺️ Легенда карты</button>
+    <button id="animBtn" class="secondary">✨ Анимации: полные</button>
     <button id="tipsBtn" class="secondary">💡 Подсказки: вкл</button>
     <button id="tipsResetBtn" class="secondary">💡 Показать подсказки заново</button>
     <button id="restartBtn" class="secondary">🔄 Новая игра</button>
@@ -262,7 +273,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.22.1', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.25.1', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -411,7 +422,7 @@ function unitsByFaction(faction,tier){
 }
 function makeRecruitEntry(k){
   const maxStock=Math.max(5,Math.round(60/UNITS[k].tier));
-  return {key:k,cost:8+UNITS[k].tier*8,maxStock,stock:maxStock};
+  return {key:k,cost:Math.round((8+UNITS[k].tier*8)*priceMult(GEN_CI)),maxStock,stock:maxStock};
 }
 function pickN(arr,n,rng){
   const copy=arr.slice(); const out=[];
@@ -420,18 +431,18 @@ function pickN(arr,n,rng){
 }
 
 const SPELLS=[
-  {key:'heal',name:'Исцеление',cost:80,emoji:'✨',desc:'Лечит 30% отряда в бою',reqMagic:0},
-  {key:'fireball',name:'Огненный шар',cost:120,emoji:'🔥',desc:'30 урона по врагу в бою',reqMagic:0},
-  {key:'haste',name:'Ускорение',cost:60,emoji:'💨',desc:'Отряд до конца боя ходит на 2 клетки дальше и действует раньше; ход не тратится',reqMagic:5},
-  {key:'multiply',name:'Размножение',cost:100,emoji:'🐣',desc:'+25-50% числа юнитов в отряде',reqMagic:8},
-  {key:'resurrect',name:'Воскрешение',cost:130,emoji:'💫',desc:'Полностью восстанавливает отряд',reqMagic:10},
-  {key:'infection',name:'Зараза',cost:110,emoji:'🦠',desc:'Урон врагу и соседним вражеским отрядам',reqMagic:8},
+  {key:'heal',name:'Исцеление',cost:80,emoji:'✨',desc:'Лечит отряд на 20% +1% за очко МС (до 60%)',reqMagic:0},
+  {key:'fireball',name:'Огненный шар',cost:120,emoji:'🔥',desc:'30 урона +6 за очко МС — по самому большому вражескому отряду',reqMagic:0},
+  {key:'haste',name:'Ускорение',cost:60,emoji:'💨',desc:'До конца боя +2 клетки хода (+1 за каждые 10 МС) и место раньше в очереди; ход не тратится',reqMagic:5},
+  {key:'multiply',name:'Теневые копии',cost:100,emoji:'👤',desc:'Рядом встаёт тень отряда: 15% бойцов +1% за очко МС (до 40%), 70% урона и здоровья, исчезает после боя. Раз на отряд за бой',reqMagic:8},
+  {key:'resurrect',name:'Воскрешение',cost:130,emoji:'💫',desc:'Восстанавливает отряд до 50% +2% за очко МС (до 100%)',reqMagic:10},
+  {key:'infection',name:'Зараза',cost:110,emoji:'🦠',desc:'35 урона +7 за очко МС самому большому врагу и 15 +3 за очко — соседям',reqMagic:8},
 ];
 const ADV_SPELLS=[
   {key:'towngate',name:'Переход к городу',cost:100,emoji:'🚪',desc:'Телепорт к своему городу/замку/пещере',reqMagic:5},
-  {key:'givearmy',name:'Дать армию',cost:90,emoji:'🐎',desc:'Призывает случайный отряд бесплатно',reqMagic:8},
-  {key:'quasi',name:'Квази-авторитет',cost:70,emoji:'📈',desc:'+40 к лидерству до конца недели',reqMagic:12},
-  {key:'tornado',name:'Смерч',cost:110,emoji:'🌪️',desc:'Изгоняет Чёрного Колдуна в случайную точку карты',reqMagic:6},
+  {key:'givearmy',name:'Дать армию',cost:90,emoji:'🐎',desc:'Отряд уровня земли, +5% численности за очко МС (в пределах лидерства)',reqMagic:8},
+  {key:'quasi',name:'Квази-авторитет',cost:70,emoji:'📈',desc:'+20 лидерства +2 за очко МС до конца недели',reqMagic:12},
+  {key:'tornado',name:'Смерч',cost:110,emoji:'🌪️',desc:'Уносит Колдуна прочь; он не преследует 1 день +1 за каждые 10 МС',reqMagic:6},
 ];
 /* ================= СНАРЯЖЕНИЕ: 7 ЯЧЕЕК =================
    Шлем, броня, правая рука, левая рука, кольцо, амулет, сапоги. Двуручное оружие (twoHanded) занимает обе руки.
@@ -528,6 +539,26 @@ function migrateEquipment(){
 }
 /* Уровни заклинаний: земля с тиром T продаёт заклинания уровня ≤ T+1. */
 const SPELL_TIER={heal:1,fireball:1,haste:1,towngate:1,tornado:1,infection:2,givearmy:2,multiply:2,resurrect:3,quasi:3};
+/* Сила заклинаний растёт с магической силой героя (МС): кольца, книги, посохи, уровни и чародейка усиливают магию. */
+const SP={
+  heal:()=>Math.min(60,20+magicPower()), fire:()=>30+6*magicPower(),
+  infMain:()=>35+7*magicPower(), infNear:()=>15+3*magicPower(),
+  haste:()=>2+Math.floor(magicPower()/10), shadow:()=>Math.min(40,15+magicPower()),
+  resurrect:()=>Math.min(100,50+2*magicPower()), army:()=>1+0.05*magicPower(),
+  quasi:()=>20+2*magicPower(), tornado:()=>1+Math.floor(magicPower()/10),
+};
+function spellNow(k){ switch(k){
+  case 'heal': return `лечит ${SP.heal()}% отряда`;
+  case 'fireball': return `${SP.fire()} урона`;
+  case 'infection': return `${SP.infMain()} урона цели, ${SP.infNear()} соседям`;
+  case 'haste': return `+${SP.haste()} кл. хода`;
+  case 'multiply': return `тень из ${SP.shadow()}% бойцов`;
+  case 'resurrect': return `восстанавливает до ${SP.resurrect()}%`;
+  case 'givearmy': return `отряд ×${SP.army().toFixed(2)}`;
+  case 'quasi': return `+${SP.quasi()} лидерства на неделю`;
+  case 'tornado': return `Колдун не преследует ${SP.tornado()} дн.`;
+  case 'towngate': return 'мгновенный переход';
+  default: return ''; } }
 function allSpells(){ return [...SPELLS,...ADV_SPELLS]; }
 function spellByKey(k){ return allSpells().find(x=>x.key===k); }
 const SLOTS=['helmet','armor','right','left','ring','amulet','boots'];
@@ -683,9 +714,12 @@ let worlds=[], curCont=0, unlocked=[true,false,false,false,false];
 function contCfg(i){ return CONTINENTS[i===undefined?curCont:i]; }
 function contTier(i){ return contCfg(i).tier; }
 function goldMult(i){ return 1+0.5*contTier(i); }
-function foeMult(i){ return 1+0.35*contTier(i); }
+/* Сложность земель: численность врагов ×1 / ×1,6 / ×2,2 / ×2,8 / ×3,4; цены найма ×1 / ×1,25 / ×1,5 / ×1,75 / ×2. */
+function foeMult(i){ return 1+0.6*contTier(i); }
+function priceMult(i){ return 1+0.25*contTier(i); }
+let GEN_CI=0; // земля, которая сейчас генерируется (для цен найма)
 function makeCaveEntry(k,rng){
-  const base=8+UNITS[k].tier*8;
+  const base=(8+UNITS[k].tier*8)*priceMult(GEN_CI);
   const cost=Math.round(base*(1.15+rng()*0.10));
   const stock=Math.max(10,Math.round(80/UNITS[k].tier));
   return {key:k,cost,maxStock:stock,stock,noRestock:true};
@@ -714,6 +748,7 @@ function terrainParams(rng,cfg){
 function landCount(){ let n=0; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++) if(terrainGrid[r][c]!=='w') n++; return n; }
 /* Генерирует континент ci в глобальные terrainGrid/pois/sorcerer/CITY1 и возвращает объект мира. */
 function generateWorld(ci){
+  GEN_CI=ci;
   const cfg=CONTINENTS[ci], T=cfg.tier;
   const rng=mulberry32(worldSeed+ci*7919);
   // перебираем несколько сидов рельефа: нужна большая связная суша вокруг столицы
@@ -832,7 +867,7 @@ function generateWorld(ci){
       const k=allUnitKeys[Math.floor(rng()*allUnitKeys.length)];
       const stock=Math.max(5,Math.round(40/UNITS[k].tier));
       newPois.push({r:p.r,c:p.c,type:'camp',name:'Лагерь наёмников',emoji:'⛺',isCamp:true,
-        recruit:[{key:k,cost:8+UNITS[k].tier*8,maxStock:stock,stock,noRestock:true}]});
+        recruit:[{key:k,cost:Math.round((8+UNITS[k].tier*8)*priceMult(ci)),maxStock:stock,stock,noRestock:true}]});
     }
   }
   // chests
@@ -1146,7 +1181,9 @@ function dismissMutineersAndFight(){
 }
 function mutinyCancel(){ closeModal(); pendingBattle=null; curEncounter=null; currentWallBonus=0; setInfo('Вы отказались от боя.'); renderMap(); }
 /* Бунт в начале боя: лишняя часть самых требовательных отрядов переходит к врагу и после боя не возвращается. */
+let battleHadMutiny=false, battleStartPow=0;
 function doMutiny(){
+  battleHadMutiny=true;
   const plan=mutinyPlan(); let lostTotal=0;
   plan.forEach((x,i)=>{
     const u=UNITS[x.key], lost=x.n*u.hp, st=stacks.find(s=>s.side==='player'&&s.armyId===x.a.id);
@@ -1187,10 +1224,14 @@ function checkLandComplete(){
     landComplete=true;
     const next=curCont+1;
     track('land_complete',{land:curCont,days:day,playMin:Math.round(stats.playMs/60000)});
+    achFlag('land_'+curCont); achFlag('hero_'+heroClass);
+    if(!(worlds[curCont]&&worlds[curCont].intercepted)) achFlag('untouchable');
+    if(hardMode&&landsConquered()>=CONTINENTS.length) achFlag('hardAll');
+    setTimeout(achSyncRun,800);
     if(challenge){ setTimeout(finishChallenge,1500); return; }
     if(next<CONTINENTS.length){
       unlocked[next]=true;
-      setTimeout(()=>setInfo(`🎉 <b>${contCfg().name} покорён!</b> На собранной карте проступил путь в земли ${CONTINENTS[next].emoji} <b>${CONTINENTS[next].name}</b>. Отплыть можно из любой пристани (нужен корабль).`),100);
+      setTimeout(()=>setInfo(`🎉 <b>${contCfg().name} покорён!</b> На собранной карте проступил путь в земли ${CONTINENTS[next].emoji} <b>${CONTINENTS[next].name}</b>. Отплыть можно из любой пристани (нужен корабль).<br><button class="secondary" onclick="openShareProgress()">📤 Поделиться победой</button>`),100);
     } else {
       stats.finishedAt=Date.now(); saveSoon(true);
       setTimeout(()=>openStats(true),400);
@@ -1227,6 +1268,7 @@ function triggerGameOver(reason){
     <p style="color:var(--muted);font-size:12.5px;">Жёсткий режим: поражение необратимо, второго шанса не будет.</p>
     ${battleLogFresh&&lastBattleLog.length?`<button class="secondary" onclick="openBattleLog()">📜 Лог последнего боя</button>`:''}
     <button class="secondary" onclick="openStats(false)">📊 Летопись павшего героя</button>
+    ${challenge?'':`<button class="secondary" onclick="openShareProgress()">📤 Поделиться походом</button>`}
     ${challenge?`<button onclick="resumeCampaign()">↩️ Вернуться к кампании</button>`:''}
     <button class="secondary" onclick="openNewGame(false)">🔄 Начать заново</button></div>`;
 }
@@ -1288,11 +1330,13 @@ function pathTiles(dist,r,c){
 function battleCasualties(){
   let slain=0, lost=0;
   stacks.forEach(s=>{
+    if(s.shadow) return; // тени — не бойцы армии
     const uh=UNITS[s.key].hp, alive=s.hp>0?Math.ceil(s.hp/uh):0;
-    if(s.side==='enemy') slain+=Math.max(0,Math.ceil(s.maxHp/uh)-alive);
+    if(s.side==='enemy'){ const k=s.fled?0:Math.max(0,Math.ceil(s.maxHp/uh)-alive); slain+=k; achAdd('k_'+s.key,k); achAdd('f_'+UNITS[s.key].faction,k); }
     else lost+=Math.max(0,Math.ceil((s.startHp||s.hp)/uh)-alive);
   });
-  stats.enemiesSlain+=slain; stats.troopsLost+=lost;
+  stats.enemiesSlain+=slain; stats.troopsLost+=lost; achAdd('slain',slain);
+  return lost;
 }
 /* ================= ПЕРЕДВИЖЕНИЕ: ВРЕМЯ ИДЁТ ПО ШАГАМ ГЕРОЯ =================
    Такт = одно очко хода героя (болото — 2 такта на клетку). За такт преследователь получает свою скорость
@@ -1320,8 +1364,11 @@ function pursuitTick(){
     while(p._acc>=1){ p._acc-=1; if(!mobStep(p,field)) break; }
   });
   if(sorcerer&&sorcerer.active){
-    sorcerer._acc=(sorcerer._acc||0)+SORC_SPEED;
-    while(sorcerer._acc>=1){ sorcerer._acc-=1; if(!mobStep(sorcerer,field)) break; }
+    // Колдун замечает героя на расстоянии обзора героя — значит, из тумана он не выбежит: вы увидите его первым или одновременно
+    const sd=fieldAt(field,sorcerer.r,sorcerer.c), dr=hero.row-sorcerer.r, dc=hero.col-sorcerer.c, vr=visionRadius();
+    if(!sorcerer.chasing&&(sorcerer.calmUntil||0)<day&&dr*dr+dc*dc<=vr*vr+vr&&sd>0&&sd<=vr+3){ sorcerer.chasing=true; sorcerer.justNoticed=true; }
+    if(sorcerer.chasing&&(sd<0||sd>CHASE_LOSE)) sorcerer.chasing=false;
+    if(sorcerer.chasing){ sorcerer._acc=(sorcerer._acc||0)+SORC_SPEED; while(sorcerer._acc>=1){ sorcerer._acc-=1; if(!mobStep(sorcerer,field)) break; } }
   }
   if(heroOnWater()) return null;
   const near=e=>Math.max(Math.abs(e.r-hero.row),Math.abs(e.c-hero.col))<=1;
@@ -1332,6 +1379,7 @@ function pursuitTick(){
 }
 function resolveIntercept(ic){
   if(!ic) return;
+  if(worlds[curCont]) worlds[curCont].intercepted=true;
   track('intercept',{by:ic.kind==='sorc'?'sorcerer':lairUnitKey(ic.obj)});
   if(ic.kind==='sorc') sorcererCatch(); else startEncounter(ic.obj,true);
 }
@@ -1343,7 +1391,7 @@ function threatSources(){
   if(sorcerer&&sorcerer.active&&isExplored(sorcerer.r,sorcerer.c)) out.push(sorcerer);
   return out;
 }
-function inThreatZone(src,r,c){ const dr=r-src.r, dc=c-src.c, R2=noticeR(); return dr*dr+dc*dc<=R2*R2+R2; }
+function inThreatZone(src,r,c){ const dr=r-src.r, dc=c-src.c, R2=src===sorcerer?visionRadius():noticeR(); return dr*dr+dc*dc<=R2*R2+R2; }
 /* Предпросмотр маршрута: первое нажатие рисует путь, второе на ту же клетку — идти. Соседняя клетка — сразу. */
 let pendingRoute=null;
 function routePreviewText(path,cost){
@@ -1361,7 +1409,7 @@ function simulateWalk(path){
   for(let i=1;i<path.length&&!ic;i++){
     const q=path[i], cost=stepCostAt(q.r,q.c);
     hero.row=q.r; hero.col=q.c; walked.push(q); spent+=cost;
-    if(tch(q.r,q.c)==='w') stats.tilesSailed++; else stats.tilesWalked++;
+    if(tch(q.r,q.c)==='w'){ stats.tilesSailed++; achAdd('sailed',1); } else { stats.tilesWalked++; achAdd('walked',1); }
     revealAround(q.r,q.c);
     for(let t=0;t<cost&&!ic;t++) ic=pursuitTick();
     tracks.forEach(tr=>tr.pos.push({r:tr.obj.r,c:tr.obj.c}));
@@ -1403,6 +1451,7 @@ function tileClick(r,c){
     if(sim.ic){ renderMap(); resolveIntercept(sim.ic); return; }
     const p=poiAt(end.r,end.c);
     if(p) triggerPoi(p); else setInfo(`Ходов осталось: ${movesLeft}.`);
+    if(sorcerer&&sorcerer.justNoticed){ sorcerer.justNoticed=false; setInfo(document.getElementById('info').innerHTML+'<br>🌑 <b>Чёрный Колдун заметил вас</b> и идёт следом! Уходите, прячьтесь за лесом или изгоните его Смерчем.'); }
     renderMap();
     if(view==='map'&&movesLeft<=0) showTip('day');
   },sim.tracks);
@@ -1539,7 +1588,7 @@ function lairWilling(lair){ return power(army,true)>power(lair.enemies,false)*1.
 /* Найм отряда с карты: цена бойца — городская (8 + 8 × уровень) × 1,3; платите только за нанятых.
    «Помещаются» — по свободному лидерству и ячейкам армии; «все» — сверх лидерства (риск бунта), но ячейки обязательны.
    Не нанятые расходятся, логово очищается. */
-function hirePrice(key){ return Math.round((8+8*UNITS[key].tier)*1.3); }
+function hirePrice(key){ return Math.round((8+8*UNITS[key].tier)*priceMult(curCont)*1.3); }
 function hirePlan(lair){
   let free=leadershipMax()-leadershipUsed();
   const slots0=(5-activeStacks().length)+(5-reserveStacks().length);
@@ -1911,6 +1960,7 @@ function relocateSorcerer(){
   if(spot){ sorcerer.r=spot.r; sorcerer.c=spot.c; }
 }
 function sorcererCatch(){
+  if(sorcerer) sorcerer.chasing=false;
   stats.sorcererCaught++;
   const options=[];
   options.push(()=>{ const lost=Math.floor(gold*0.4); gold-=lost; return `похищает ${lost}💰!`; });
@@ -1931,7 +1981,7 @@ function openAdventureMagic(){
   let html=`🪄 <b>Походная магия</b>:<br>`;
   ADV_SPELLS.forEach(s=>{
     const owned=spellCharges[s.key]||0;
-    html+=`<button ${owned<=0?'disabled':''} onclick="castAdventureSpell('${s.key}')">${s.emoji} ${s.name} (${owned})</button> `;
+    html+=`<button ${owned<=0?'disabled':''} title="${spellNow(s.key)}" onclick="castAdventureSpell('${s.key}')">${s.emoji} ${s.name} (${owned})<small style="display:block;font-weight:normal;font-size:11px;opacity:.85;">${spellNow(s.key)}</small></button> `;
   });
   if(ADV_SPELLS.every(s=>!(spellCharges[s.key]>0))) html+='<br><span style="color:var(--muted);font-size:12.5px;">Нет запасов — купите в лавке заклинаний любого города.</span>';
   setInfo(html);
@@ -1939,24 +1989,28 @@ function openAdventureMagic(){
 function castAdventureSpell(k){
   if(!spellCharges[k]) return;
   if(k==='towngate'){ showTownGatePicker(); return; }
-  spellCharges[k]--; stats.spellsCast++; updateHud();
+  spellCharges[k]--; stats.spellsCast++; updateHud(); achAdd('cast_'+k,1);
   if(k==='givearmy'){
-    const allKeys=Object.keys(UNITS);
-    const uk=allKeys[Math.floor(R()*allKeys.length)];
-    const count=Math.max(2,Math.round(20/UNITS[uk].tier));
+    // отряд уровня этой земли (а не любой из 32, вплоть до драконов) и не больше, чем позволяет свободное лидерство
+    const T=contTier(), pool=Object.keys(UNITS).filter(key=>UNITS[key].tier>=Math.max(1,T)&&UNITS[key].tier<=T+1);
+    const uk=pool[Math.floor(R()*pool.length)];
+    const free=leadershipMax()-leadershipUsed();
+    const count=Math.min(Math.max(2,Math.round(20/UNITS[uk].tier*SP.army())),Math.floor(free/UNITS[uk].leadershipCost));
+    if(count<1){ spellCharges[k]++; stats.spellsCast--; updateHud(); setInfo(`🐎 Дух битвы готов прислать ${UNITS[uk].name.toLowerCase()}, но вам не хватает лидерства. Заряд не потрачен.`); return; }
     const addHp=count*UNITS[uk].hp;
     let existing=army.find(a=>a.key===uk&&a.hp>0);
     if(existing){ existing.hp+=addHp; existing.max+=addHp; setInfo(`🐎 ${UNITS[uk].emoji} ${UNITS[uk].name} ×${count} присоединились к армии!`); }
     else{ const slot=freeSlot(); if(!slot){ setInfo('⚠️ Все 10 слотов армии заняты — отряд не смог присоединиться.'); }
       else{ army.push({id:Date.now()+Math.random(),key:uk,hp:addHp,max:addHp,zone:slot}); setInfo(`🐎 Дух битвы отвечает на зов: ${UNITS[uk].emoji} ${UNITS[uk].name} ×${count} присоединились к армии (${slot==='active'?'актив':'резерв'})!`); } }
   } else if(k==='quasi'){
-    quasiExpireWeek=week+1; quasiBonus=40;
-    setInfo('📈 Квази-авторитет: +40 к лидерству до конца текущей недели.');
+    quasiExpireWeek=week+1; quasiBonus=SP.quasi();
+    setInfo(`📈 Квази-авторитет: +${quasiBonus} к лидерству до конца текущей недели.`);
   } else if(k==='tornado'){
     if(!sorcerer || !sorcerer.active){ setInfo('🌪️ Колдуна сейчас нигде не видно.'); }
     else{
       relocateSorcerer();
-      setInfo('🌪️ Смерч подхватывает Чёрного Колдуна и уносит его далеко прочь!');
+      sorcerer.chasing=false; sorcerer.calmUntil=day+SP.tornado()-1;
+      setInfo(`🌪️ Смерч подхватывает Чёрного Колдуна и уносит его далеко прочь! ${SP.tornado()>1?`Ещё ${SP.tornado()} дн.`:'До конца дня'} он не будет вас преследовать.`);
     }
   }
   renderMap();
@@ -2089,7 +2143,7 @@ function renderCity(msg){
     [...SPELLS.map(s=>({...s,ctx:'бой'})),...ADV_SPELLS.map(s=>({...s,ctx:'поход'}))].filter(s=>sh.spells.includes(s.key)).forEach(s=>{
       const locked=magicPower()<s.reqMagic;
       const cost=spellCost(s);
-      html+=`<div class="row"><span>${s.emoji} ${s.name} [${s.ctx}] (${s.desc}) — ${cost}💰${locked?` <span style="color:var(--bad)">(нужна маг.сила ${s.reqMagic})</span>`:''}<br><span style="color:var(--muted)">В запасе: ${spellCharges[s.key]||0}</span></span>
+      html+=`<div class="row"><span>${s.emoji} ${s.name} [${s.ctx}] (${s.desc}) <span style="color:var(--good);">сейчас: ${spellNow(s.key)}</span> — ${cost}💰${locked?` <span style="color:var(--bad)">(нужна маг.сила ${s.reqMagic})</span>`:''}<br><span style="color:var(--muted)">В запасе: ${spellCharges[s.key]||0}</span></span>
         <span class="rowbtns"><button onclick="buySpell('${s.key}')" ${locked?'disabled':''}>Купить</button></span></div>`;
     });
     html+=`</div>`;
@@ -2218,12 +2272,15 @@ function switchZone(armyId){
 /* ================= BATTLE ================= */
 let stacks=[],order=[],idx=0,battleOver=false,logLines=[];
 function bUnit(s){ return UNITS[s.key]; }
-function bCount(s){ return Math.max(1,Math.ceil(s.hp/bUnit(s).hp)); }
+function bCount(s){ return Math.max(1,Math.ceil(s.hp/(bUnit(s).hp*(s.hpMul||1)))); }
 function bOccupied(r,c){ return isObst(r,c)||stacks.some(s=>s.hp>0&&s.row===r&&s.col===c); }
 function bLog(t){ logLines.push(t); if(logLines.length>60) logLines.shift(); }
 function syncArmyFromBattle(){
-  // «Размножение» в бою добавляет новых бойцов насовсем — максимум армии растёт вместе с ним
-  stacks.filter(s=>s.side==='player').forEach(s=>{ const a=army.find(x=>x.id===s.armyId); if(a){ a.hp=s.hp; a.max=Math.max(a.max||0,s.maxHp||0,a.hp); } });
+  // «Размножение» создаёт копии только на этот бой: после боя отряд не больше, чем был до боя
+  let faded=0;
+  stacks.filter(s=>s.side==='player').forEach(s=>{ const a=army.find(x=>x.id===s.armyId); if(!a) return;
+    const cap=Math.max(a.max||0,s.startHp||0); if(s.hp>cap) faded+=Math.ceil((s.hp-cap)/UNITS[s.key].hp); a.hp=Math.min(s.hp,cap); a.max=Math.max(a.max||0,a.hp); });
+  if(faded>0) bLog(`🐣 Призрачные копии рассеялись (${faded}).`);
 }
 function beginBattle(enc){
   // превышение лидерства — сначала предупреждение (до броска удачи испытания, чтобы отказ не тратил попытку)
@@ -2239,7 +2296,9 @@ function beginBattle(enc){
   const erows=bSlotRows(enc.enemies.length);
   enc.enemies.forEach((e,i)=>{ const hp=e.count*UNITS[e.key].hp; stacks.push({id:'e'+i,side:'enemy',key:e.key,hp:hp,maxHp:hp,row:erows[i],col:BF_COLS-1}); });
   bfx=[]; bVis={}; bObst=[]; bScene=makeBattleScene(enc); bObst=genObstacles(bScene);
+  battleHadMutiny=false; victoryDone=false; battleStartPow=stacks.filter(x=>x.side==='player').reduce((a,x)=>a+bCount(x)*(bUnit(x).hp+bUnit(x).dmg[1]),0);
   bLog(`⚔️ Бой у «${enc.name}» начался!`);
+  if(contTier()>0) bLog(`🛡️ Враги этой земли закалены: +${contTier()} к защите.`);
   { const ref=curEncounter&&curEncounter.ref; if(ref&&ref.lordItem&&(curEncounter.type==='capture'||curEncounter.type==='governor_war')){ const it=ITEMS[ref.lordItem]; bLog(`🎁 ${ref.lord||ref.name} сражается, держа ${it.emoji} «${it.name}»: ${lordBattleText(it)}.`); } }
   if(leadershipExcess()>0){ const ch=mutinyChance(); if(R()<ch) doMutiny(); else bLog(`🤝 Армия была на грани бунта (шанс ${Math.round(ch*100)}%), но подчинилась.`); }
   order=stacks.slice().sort((a,b)=>bUnit(b).speed-bUnit(a).speed); idx=0;
@@ -2268,10 +2327,17 @@ function checkLevelUp(){
     bLog && bLog(`🌟 Новый уровень! ${h.name} ${heroLevel} ур. (+${dl} к лидерству, +${dm} к магической силе${rangerMove}).`);
   }
 }
+let victoryDone=false;
 function onVictory(){
+  if(victoryDone) return; victoryDone=true; // одна победа — одно засчитывание наград и достижений
   bLog('🏆 Победа!'); syncArmyFromBattle();
   track('battle',{res:'win',kind:curEncounter&&curEncounter.type,pow:lastBattleEnemyPower});
-  stats.battlesWon++; battleCasualties(); stats.strongestFoe=Math.max(stats.strongestFoe,lastBattleEnemyPower);
+  stats.battlesWon++; const lostNow=battleCasualties(); stats.strongestFoe=Math.max(stats.strongestFoe,lastBattleEnemyPower);
+  achAdd('wins',1);
+  if(lostNow===0&&lastBattleEnemyPower>=battleStartPow) achAdd('flawless',1);
+  if(lastBattleEnemyPower>=2*battleStartPow) achAdd('underdog',1);
+  if(battleHadMutiny) achAdd('mutinyWin',1);
+  setTimeout(achSyncRun,1500);
   currentWallBonus=0;
   const expGain=Math.max(10,Math.round(lastBattleEnemyPower/3));
   heroExp+=expGain; bLog(`✨ Получено опыта: +${expGain}.`);
@@ -2302,7 +2368,7 @@ function onVictory(){
     const city=curEncounter.ref;
     city.owner='player'; mapPieces++;
     const reward=Math.round((20+R()*40)*goldMult()); gold+=reward; updateHud();
-    const trophy=takeLordItem(city);
+    const trophy=takeLordItem(city); achAdd('castles',1);
     bLog(`🏴 ${city.lord} повержен(а)! «${city.name}» захвачен (${mapPieces}/${TOTAL_PIECES}).`);
     checkLandComplete();
     setTimeout(()=>{ openCity(city); renderCity(`Замок захвачен! +${reward}💰.${trophy}`); setTimeout(()=>openPieces(true),250); },1300);
@@ -2310,7 +2376,7 @@ function onVictory(){
     const gov=curEncounter.ref;
     gov.owner='player'; mapPieces=TOTAL_PIECES;
     const reward=Math.round((50+R()*60)*goldMult()); gold+=reward; updateHud();
-    const trophy=takeLordItem(gov);
+    const trophy=takeLordItem(gov); achAdd('castles',1);
     bLog(`👑 Хозяин Земли повержен! Последняя часть карты собрана (${mapPieces}/${TOTAL_PIECES})!`);
     checkLandComplete();
     setTimeout(()=>{ openCity(gov); renderCity(`Хозяин Земли повержен! +${reward}💰. Земля покорена полностью.${trophy}`); setTimeout(()=>openPieces(true),250); },1300);
@@ -2336,17 +2402,19 @@ function onDefeat(){
 function doAttack(att,def,fxDelay){
   const au=bUnit(att), du=bUnit(def), cnt=bCount(att);
   const roll=Math.floor(R()*(au.dmg[1]-au.dmg[0]+1))+au.dmg[0] + (att.side==='player'?equipBonus('dmg')+(au.ranged?equipBonus('rangedDmg'):0):enemyBonus('dmg')+(au.ranged?enemyBonus('rangedDmg'):0));
-  const defVal=du.def + (def.side==='player'?equipBonus('def'):0) + (def.side==='enemy'?currentWallBonus+enemyBonus('def'):0);
+  const defVal=du.def + (def.side==='player'?equipBonus('def'):0) + (def.side==='enemy'?currentWallBonus+enemyBonus('def')+contTier():0);
   let dmg=Math.round(cnt*roll*(1-Math.min(0.7,defVal*0.05))); dmg=Math.max(cnt,dmg);
   const isShot=au.ranged&&dist(att,def)>1, cover=isShot&&shotCovered(att,def);
   if(isShot&&def.side==='player'&&equipBonus('shotDef')>0) dmg=Math.max(1,Math.round(dmg*(1-Math.min(60,equipBonus('shotDef'))/100)));
   if(isShot&&def.side==='enemy'&&enemyBonus('shotDef')>0) dmg=Math.max(1,Math.round(dmg*(1-Math.min(60,enemyBonus('shotDef'))/100)));
+  if(att.shadow) dmg=Math.max(1,Math.round(dmg*0.7)); // тень бьёт слабее
+  const rangedMelee=au.ranged&&!isShot; if(rangedMelee) dmg=Math.max(1,Math.round(dmg*0.5)); // стрелок врукопашную — вполсилы
   if(cover){ dmg=Math.max(1,Math.round(dmg*0.7)); fxPush({type:'float',r:def.row,c:def.col,text:'🛡 укрытие',color:'#cfd8e0',dur:1100,delay:(fxDelay||0)+150}); }
   def.hp-=dmg;
   fxAttack(att,def,dmg,isShot,fxDelay||0);
-  bLog(`${au.emoji} «${au.name}» бьёт: -${dmg} «${du.name}»${cover?' (укрытие −30%)':''}`);
+  bLog(`${au.emoji} «${au.name}» бьёт: -${dmg} «${du.name}»${cover?' (укрытие −30%)':''}${rangedMelee?' (врукопашную вполсилы)':''}`);
   if(def.hp<=0){ def.hp=0; bLog(`☠️ «${du.name}» уничтожены!`); }
-  else if(!au.ranged){
+  else if(!isShot){ // ответный удар — на любую атаку вплотную, в том числе стрелков врукопашную
     const dCnt=bCount(def), rroll=Math.floor(R()*(du.dmg[1]-du.dmg[0]+1))+du.dmg[0] + (def.side==='player'?equipBonus('dmg'):0);
     const atkDefVal=au.def + (att.side==='player'?equipBonus('def'):0);
     let rdmg=Math.round(dCnt*rroll*(1-Math.min(0.7,atkDefVal*0.05))*0.7); rdmg=Math.max(1,rdmg);
@@ -2390,7 +2458,7 @@ function aiAct(stack){
 function dist(a,b){ return Math.max(Math.abs(a.row-b.row),Math.abs(a.col-b.col)); }
 /* Дальность хода отряда: половина скорости, не меньше 1. */
 /* Скорость с учётом «Ускорения»: +4 скорости = +2 клетки хода и место раньше в очереди, до конца боя. */
-function bSpeed(stack){ return bUnit(stack).speed+(stack.haste?4:0); }
+function bSpeed(stack){ return bUnit(stack).speed+(stack.haste?(stack.hasteSpeed||4):0); }
 function bMoveRange(stack){ return Math.max(1,Math.round(bSpeed(stack)/2)); }
 /* Поиск пути в бою: отряд идёт по свободным клеткам (8 направлений), сквозь войска и препятствия не проходит,
    по диагонали между двумя занятыми клетками не протискивается. bReach — куда можно дойти за ход (с путями). */
@@ -2429,7 +2497,12 @@ function bApproachCell(stack,target,reach){
   return best;
 }
 /* Может ли отряд атаковать цель в этот ход: стрелок — всегда, вплотную — да, иначе — если есть клетка подхода. */
-function bCanStrike(stack,target){ return bUnit(stack).ranged||dist(stack,target)<=1||!!bApproachCell(stack,target); }
+/* Стрелки, у которых рядом враг, не стреляют: могут только ударить соседа врукопашную (вполсилы) или отойти. */
+function bEngaged(stack){ return stacks.some(o=>o.hp>0&&o.side!==stack.side&&dist(o,stack)<=1); }
+function bCanStrike(stack,target){
+  if(bUnit(stack).ranged) return bEngaged(stack)?dist(stack,target)<=1:true;
+  return dist(stack,target)<=1||!!bApproachCell(stack,target);
+}
 function cellClick(r,c){
   if(battleOver||view!=='battle') return;
   const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
@@ -2437,6 +2510,7 @@ function cellClick(r,c){
   const u=bUnit(cur), target=stacks.find(s=>s.hp>0&&s.row===r&&s.col===c);
   if(target && target.side==='enemy'){
     const d=dist(cur,target);
+    if(u.ranged&&d>1&&bEngaged(cur)){ bLog(`🏹 «${u.name}» не могут стрелять — рядом враг. Бейте соседа врукопашную или отойдите.`); renderBattle(); return; }
     if(u.ranged||d<=1){ doAttack(cur,target); renderBattle(); bEndTurn(); return; }
     // подойти и ударить за один ход
     const reach=bReach(cur), ap=bApproachCell(cur,target,reach);
@@ -2453,41 +2527,47 @@ function castSpell(k){
   const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
   if(!cur||cur.side!=='player'||!spellCharges[k]) return;
   if(k==='haste'&&cur.haste){ bLog(`💨 «${bUnit(cur).name}» уже ускорены.`); renderBattle(); return; }
-  spellCharges[k]--; stats.spellsCast++;
+  if(k==='multiply'&&(cur.shadowCast||cur.shadow)){ bLog(cur.shadow?'👤 Тень не может отбрасывать тень.':`👤 «${bUnit(cur).name}» уже вызывали свою тень в этом бою.`); renderBattle(); return; }
+  if(k==='multiply'&&!DIRS8B.some(([dr,dc])=>bFree(cur.row+dr,cur.col+dc,null))){ bLog('👤 Тени негде встать — рядом нет свободной клетки.'); renderBattle(); return; }
+  spellCharges[k]--; stats.spellsCast++; achAdd('cast_'+k,1);
   if(k==='heal'){
     // лечит до 30% полного здоровья отряда, но не выше полного и никогда не уменьшает
-    const before=cur.hp, full=Math.max(cur.maxHp,cur.hp); cur.hp=Math.max(cur.hp,Math.min(full,cur.hp+Math.round(full*0.3)));
+    const before=cur.hp, full=Math.max(cur.maxHp,cur.hp); cur.hp=Math.max(cur.hp,Math.min(full,cur.hp+Math.round(full*SP.heal()/100)));
     const healed=cur.hp-before; fxSpell(cur,'✨',healed>0?'+'+healed:'полон','#8dff8a');
     bLog(healed>0?`✨ Исцеление: +${healed} «${bUnit(cur).name}»`:`✨ Исцеление: «${bUnit(cur).name}» и так полностью здоровы.`); renderBattle(); bEndTurn();
   } else if(k==='fireball'){
     const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
-    if(enemies.length){ enemies.sort((a,b)=>b.hp-a.hp); const t=enemies[0]; t.hp-=30; fxSpell(t,'🔥','-30','#ffb14a');
-      bLog(`🔥 Огненный шар: -30 «${bUnit(t).name}»`);
+    if(enemies.length){ enemies.sort((a,b)=>b.hp-a.hp); const t=enemies[0], fd=SP.fire(); t.hp-=fd; fxSpell(t,'🔥','-'+fd,'#ffb14a');
+      bLog(`🔥 Огненный шар: -${fd} «${bUnit(t).name}»`);
       if(t.hp<=0){ t.hp=0; bLog(`☠️ «${bUnit(t).name}» уничтожены!`); } }
     renderBattle(); bEndTurn();
-  } else if(k==='haste'){ cur.haste=true; fxSpell(cur,'💨','+2 хода','#aee7ff'); bLog(`💨 Ускорение: «${bUnit(cur).name}» до конца боя ходят на ${bMoveRange(cur)} кл. и действуют раньше. Ход не потрачен.`); renderBattle(); }
+  } else if(k==='haste'){ cur.haste=true; cur.hasteSpeed=2*SP.haste(); fxSpell(cur,'💨','+'+SP.haste()+' хода','#aee7ff'); bLog(`💨 Ускорение: «${bUnit(cur).name}» до конца боя ходят на ${bMoveRange(cur)} кл. и действуют раньше. Ход не потрачен.`); renderBattle(); }
   else if(k==='multiply'){
-    const mult=1.25+R()*0.25;
-    const before=Math.ceil(cur.hp/bUnit(cur).hp);
-    cur.hp=Math.round(cur.hp*mult); cur.maxHp=Math.round(cur.maxHp*mult); fxSpell(cur,'🐣');
-    const after=Math.ceil(cur.hp/bUnit(cur).hp);
-    bLog(`🐣 Размножение: «${bUnit(cur).name}» ×${before}→×${after}`);
+    // Теневые копии: отдельный отряд-тень рядом — 15% бойцов +1% за очко маг. силы (до 40%), бьёт на 70%, исчезает после боя
+    const u=bUnit(cur), pct=SP.shadow()/100, n=Math.max(1,Math.floor(bCount(cur)*pct));
+    const cell=DIRS8B.map(([dr,dc])=>({r:cur.row+dr,c:cur.col+dc})).find(q=>bFree(q.r,q.c,null));
+    cur.shadowCast=true;
+    const shp=Math.round(n*u.hp*0.7); // у тени 70% здоровья
+    stacks.push({id:'sh'+(stacks.length+1),side:'player',key:cur.key,hp:shp,maxHp:shp,startHp:shp,row:cell.r,col:cell.c,shadow:true,hpMul:0.7});
+    fxSpell({row:cell.r,col:cell.c},'👤','+'+n,'#c9a8ff');
+    bLog(`👤 Теневые копии: рядом с «${u.name}» встают ${n} теней (${Math.round(pct*100)}%). Тени слабее (70% урона и здоровья) и исчезнут после боя.`);
     renderBattle(); bEndTurn();
   } else if(k==='resurrect'){
-    cur.hp=cur.maxHp; fxSpell(cur,'💫');
-    bLog(`💫 Воскрешение: «${bUnit(cur).name}» полностью восстановлен!`);
+    const full=Math.max(cur.maxHp,cur.hp), target=Math.round(full*SP.resurrect()/100), before=bCount(cur);
+    cur.hp=Math.max(cur.hp,target); fxSpell(cur,'💫','+'+Math.max(0,bCount(cur)-before),'#ffe58a');
+    bLog(`💫 Воскрешение: «${bUnit(cur).name}» восстановлены до ${SP.resurrect()}% (×${before}→×${bCount(cur)}).`);
     renderBattle(); bEndTurn();
   } else if(k==='infection'){
     const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
     if(enemies.length){
       enemies.sort((a,b)=>b.hp-a.hp);
-      const main=enemies[0]; main.hp-=35; fxSpell(main,'🦠','-35','#9dff6a');
-      bLog(`🦠 Зараза: -35 «${bUnit(main).name}»`);
+      const main=enemies[0], zd=SP.infMain(), zn=SP.infNear(); main.hp-=zd; fxSpell(main,'🦠','-'+zd,'#9dff6a');
+      bLog(`🦠 Зараза: -${zd} «${bUnit(main).name}»`);
       if(main.hp<=0){ main.hp=0; bLog(`☠️ «${bUnit(main).name}» уничтожены!`); }
       const neighbors=enemies.filter(e=>e!==main && dist(main,e)<=1);
       neighbors.forEach(n=>{
-        n.hp-=15; fxPush({type:'float',r:n.row,c:n.col,text:'-15',color:'#9dff6a',dur:900,delay:200});
-        bLog(`🦠 Зараза распространилась: -15 «${bUnit(n).name}»`);
+        n.hp-=zn; fxPush({type:'float',r:n.row,c:n.col,text:'-'+zn,color:'#9dff6a',dur:900,delay:200});
+        bLog(`🦠 Зараза распространилась: -${zn} «${bUnit(n).name}»`);
         if(n.hp<=0){ n.hp=0; bLog(`☠️ «${bUnit(n).name}» уничтожены!`); }
       });
     }
@@ -2503,7 +2583,7 @@ function renderBattle(){
   const log=document.getElementById('log'); log.innerHTML=logLines.map(l=>`<div>${l}</div>`).join(''); log.scrollTop=log.scrollHeight;
   const sb=document.getElementById('spellbar'); let sbHtml='';
   SPELLS.filter(sp=>(spellCharges[sp.key]||0)>0).forEach(sp=>{ const owned=spellCharges[sp.key]; const enabled=!battleOver&&cur&&cur.side==='player';
-    sbHtml+=`<button class="secondary" ${enabled?'':'disabled'} onclick="castSpell('${sp.key}')">${sp.emoji} ${sp.name} (${owned})</button>`; });
+    sbHtml+=`<button class="secondary" ${enabled?'':'disabled'} title="${spellNow(sp.key)}" onclick="castSpell('${sp.key}')">${sp.emoji} ${sp.name} (${owned})<small style="display:block;font-size:10.5px;opacity:.8;">${spellNow(sp.key)}</small></button>`; });
   if(!sbHtml) sbHtml=`<span style="font-size:12px;color:var(--muted);">📜 Боевых заклинаний нет — их продают в лавках городов.</span>`;
   sb.innerHTML=sbHtml;
 }
@@ -2549,7 +2629,12 @@ function makeBattleScene(enc){
 function bNow(){ return performance.now(); }
 function fxPush(e){ e.t0=bNow()+(e.delay||0); bfx.push(e); ensureBattleLoop(); }
 function ensureBattleLoop(){ if(!bAnimRunning){ bAnimRunning=true; requestAnimationFrame(battleFrame); } }
-function battleFrame(now){ const active=drawBattleCanvas(now); if(active&&view==='battle') requestAnimationFrame(battleFrame); else bAnimRunning=false; }
+let bLastDraw=0;
+function battleFrame(now){
+  if(view==='battle'&&now-bLastDraw<30){ requestAnimationFrame(battleFrame); return; } // ~30 кадров/с
+  bLastDraw=now;
+  const active=drawBattleCanvas(now); if(active&&view==='battle') requestAnimationFrame(battleFrame); else bAnimRunning=false;
+}
 function bfCanvas(){
   const host=document.getElementById('battlefield');
   let cv=host.querySelector('canvas');
@@ -2586,8 +2671,8 @@ function bHoverCursor(r,c){
   const t=stacks.find(s=>s.hp>0&&s.row===r&&s.col===c);
   if(t&&t.side==='enemy'){
     const u=bUnit(cur), d=dist(cur,t);
-    if(u.ranged&&d>1) return shotCovered(cur,t)?emojiCursor('shotCover','🎯','🛡️','crosshair'):emojiCursor('shot','🎯','','crosshair');
-    if(d<=1||bApproachCell(cur,t)) return emojiCursor('melee','⚔️','','pointer');
+    if(u.ranged&&d>1&&!bEngaged(cur)) return shotCovered(cur,t)?emojiCursor('shotCover','🎯','🛡️','crosshair'):emojiCursor('shot','🎯','','crosshair');
+    if(d<=1||(!u.ranged&&bApproachCell(cur,t))) return emojiCursor('melee','⚔️','','pointer');
     return 'not-allowed';
   }
   if(!t){ const reach=bReach(cur); if(reach.has(r+','+c)&&!(r===cur.row&&c===cur.col)) return 'pointer'; }
@@ -2710,14 +2795,15 @@ function drawBattleCanvas(now){
   stacks.slice().sort((a,b)=>PY(pos[a.id].r,pos[a.id].c)-PY(pos[b.id].r,pos[b.id].c)).forEach(s=>{
     const v=bVis[s.id]; let alpha=1;
     if(s.hp<=0){ active=true; if(v.deadAt!==undefined){ const q=(now-v.deadAt)/500; if(q>=1) return; alpha=Math.max(0,1-Math.max(0,q)); } }
-    const cx=PX(pos[s.id].r,pos[s.id].c)+cell/2, cy=PY(pos[s.id].r,pos[s.id].c)+cell/2, u=bUnit(s), team=s.side==='player'?'#4d84c4':'#c0463f';
+    const cx=PX(pos[s.id].r,pos[s.id].c)+cell/2, cy=PY(pos[s.id].r,pos[s.id].c)+cell/2, u=bUnit(s), team=s.shadow?'#6b4fa8':s.side==='player'?'#4d84c4':'#c0463f';
+    if(s.shadow) alpha*=0.72;
     g.globalAlpha=alpha;
     g.fillStyle='rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(cx+cell*0.04,cy+cell*0.3,cell*0.36,cell*0.12,0,0,Math.PI*2); g.fill();
     g.fillStyle=team; g.beginPath(); g.ellipse(cx,cy+cell*0.24,cell*0.34,cell*0.13,0,0,Math.PI*2); g.fill();
     g.strokeStyle='rgba(255,255,255,0.45)'; g.lineWidth=Math.max(1,cell*0.025); g.stroke();
     if(cur&&s.id===cur.id&&!battleOver){ const pulse=0.5+0.5*Math.sin(now/220); g.strokeStyle=`rgba(255,215,80,${0.55+0.45*pulse})`; g.lineWidth=Math.max(2,cell*0.05);
       g.beginPath(); g.ellipse(cx,cy+cell*0.24,cell*0.42,cell*0.17,0,0,Math.PI*2); g.stroke(); active=true; }
-    if(myTurn&&s.side==='enemy'&&s.hp>0&&bUnit(cur).ranged&&dist(cur,s)>1&&shotCovered(cur,s)){
+    if(myTurn&&s.side==='enemy'&&s.hp>0&&bUnit(cur).ranged&&!bEngaged(cur)&&dist(cur,s)>1&&shotCovered(cur,s)){
       g.textAlign='center'; g.textBaseline='middle'; g.font=`${Math.round(cell*0.26)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; g.fillStyle='#000'; g.fillText('🛡️',cx-cell*0.32,cy-cell*0.3); }
     if(myTurn&&s.side==='enemy'&&s.hp>0&&bCanStrike(cur,s)){ g.strokeStyle='rgba(255,90,80,0.95)'; g.lineWidth=Math.max(2,cell*0.05);
       g.setLineDash([cell*0.08,cell*0.06]); g.beginPath(); g.ellipse(cx,cy+cell*0.24,cell*0.44,cell*0.18,0,0,Math.PI*2); g.stroke(); g.setLineDash([]); }
@@ -2732,7 +2818,7 @@ function drawBattleCanvas(now){
     // число бойцов и здоровье — по «видимому» состоянию; у погибшего отряда их нет, тает только фигура
     if(v.shownN>0){
     const n=String(v.shownN), pw=Math.max(cell*0.3,cell*0.13*n.length+cell*0.12), ph=cell*0.24, px=cx+cell*0.42-pw, py=cy+cell*0.12;
-    g.fillStyle=s.side==='player'?'#2c5a8f':'#8f2d28'; pathRoundRect(g,px,py,pw,ph,[ph/2,ph/2,ph/2,ph/2]); g.fill();
+    g.fillStyle=s.shadow?'#4a3378':s.side==='player'?'#2c5a8f':'#8f2d28'; pathRoundRect(g,px,py,pw,ph,[ph/2,ph/2,ph/2,ph/2]); g.fill();
     g.strokeStyle='rgba(255,255,255,0.6)'; g.lineWidth=1; g.stroke();
     g.fillStyle='#fff'; g.font=`bold ${Math.round(cell*0.17)}px sans-serif`; g.fillText(n,px+pw/2,py+ph/2+0.5);
     // здоровье отряда
@@ -2755,6 +2841,7 @@ function drawBattleCanvas(now){
     if(f.type==='float'){ g.globalAlpha=q<0.7?1:1-(q-0.7)/0.3; g.font=`bold ${Math.round(cell*0.3)}px sans-serif`; g.textAlign='center'; g.textBaseline='middle';
       const x=PX(f.r,f.c)+cell/2, y=PY(f.r,f.c)+cell*0.1-q*cell*0.55; g.lineWidth=3; g.strokeStyle='rgba(0,0,0,0.7)'; g.strokeText(f.text,x,y); g.fillStyle=f.color; g.fillText(f.text,x,y); g.globalAlpha=1; }
   });
+  if(animFull){ wxStepDraw(g,'bf',Wc,Hc,now); active=true; }
   // виньетка
   const vg=g.createRadialGradient(Wc/2,Hc/2,Math.min(Wc,Hc)*0.4,Wc/2,Hc/2,Math.max(Wc,Hc)*0.72); vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.3)'); g.fillStyle=vg; g.fillRect(0,0,Wc,Hc);
   return active;
@@ -3082,6 +3169,10 @@ function drawWorld(g,T,dpr,R0,C0,nR,nC,opts){
   // рисуется то, что стоит на клетке (город, замок, монстр) — раньше на время пути эта клетка пустела
   for(let r=R0;r<R0+nR;r++) for(let c=C0;c<C0+nC;c++){
     if(opts.skip&&opts.skip.has(r+','+c)) continue;
+    // герой на городе, сундуке, лагере, пирамиде: объект остаётся, герой стоит перед ним, чуть меньше
+    if(opts.hero&&r===hero.row&&c===hero.col&&!onShip){ const under=objectAt(r,c,true);
+      if(under){ drawObject(g,under,X(c),Y(r),T,dpr); g.save(); g.translate(X(c)+T*0.3,Y(r)+T*0.3); g.scale(0.72,0.72); drawObject(g,heroTok(),0,0,T,dpr); g.restore();
+        if(questTargetAt(r,c)) drawQuestBadge(g,X(c),Y(r),T); continue; } }
     const o=objectAt(r,c,!opts.hero); if(!o) continue;
     drawObject(g,o,X(c),Y(r),T,dpr);
     if(questTargetAt(r,c)) drawQuestBadge(g,X(c),Y(r),T);
@@ -3492,8 +3583,9 @@ function blitMapFrame(t){
     g.globalAlpha=a*0.45; const x=w.x+T*(0.2+0.5*((w.ph*7+i*0.37)%1)), y=w.y+T*(0.25+0.45*((w.ph*3+i*0.61)%1)), l=T*(0.1+a*0.08);
     g.beginPath(); g.moveTo(x-l,y); g.quadraticCurveTo(x,y-T*0.05,x+l,y); g.stroke(); } });
   g.globalAlpha=1;
+  if(animFull) wxStepDraw(g,'map',VIEW_COLS*T,VIEW_ROWS*T,t);
 }
-setInterval(()=>{ if(booted&&view==='map'&&gfxMode==='new'&&!walkAnim&&document.visibilityState==='visible'&&waterSpots.length) blitMapFrame(performance.now()); },140);
+setInterval(()=>{ if(!animFull&&booted&&view==='map'&&gfxMode==='new'&&!walkAnim&&document.visibilityState==='visible'&&waterSpots.length) blitMapFrame(performance.now()); },140);
 function drawMapCanvas(dist,camRow,camCol){
   if(walkAnim) return; // идёт шаг — кадры рисует анимация
   const T=TILE_PX, W=VIEW_COLS*T, H=VIEW_ROWS*T, dpr=Math.min(3,window.devicePixelRatio||1);
@@ -3509,7 +3601,8 @@ function drawMapCanvas(dist,camRow,camCol){
   for(let i=1;i<VIEW_COLS;i++){ g.moveTo(i*T+0.5,0); g.lineTo(i*T+0.5,H); } for(let i=1;i<VIEW_ROWS;i++){ g.moveTo(0,i*T+0.5); g.lineTo(W,i*T+0.5); } g.stroke();
   // зоны угрозы: где бродячие отряды и Колдун заметят героя
   const threat=new Set();
-  threatSources().forEach(src=>{ for(let dr=-NOTICE_R;dr<=NOTICE_R;dr++) for(let dc=-NOTICE_R;dc<=NOTICE_R;dc++){
+  const ZR=Math.max(NOTICE_R,visionRadius());
+  threatSources().forEach(src=>{ for(let dr=-ZR;dr<=ZR;dr++) for(let dc=-ZR;dc<=ZR;dc++){
     const r=src.r+dr, c=src.c+dc; if(r<camRow||r>=camRow+VIEW_ROWS||c<camCol||c>=camCol+VIEW_COLS) continue;
     if(inThreatZone(src,r,c)&&isExplored(r,c)) threat.add(r+','+c); } });
   g.fillStyle='rgba(215,45,35,0.16)';
@@ -3545,6 +3638,101 @@ function drawMapCanvas(dist,camRow,camCol){
 /* ---------- анимация шага ---------- */
 let walkAnim=null;
 const REDUCED_MOTION=(()=>{ try{ return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(e){ return false; } })();
+/* ================= ПОГОДА И АТМОСФЕРА ЗЕМЕЛЬ =================
+   Частицы поверх карты и поля боя, в экранных координатах: Морвейн — пыльца и тени облаков, Сарнаг — песчаные
+   порывы, Хрустальный Бор — снег, Пепелище — пепел и угольки, Тёмный Удел — туман и светлячки.
+   «Анимации: упрощённые» в меню выключают частицы (для слабых телефонов). ~30 кадров/с, пауза при свёрнутой игре. */
+let animFull=(()=>{ try{ const v=localStorage.getItem('morveyn_anim'); return v?v!=='lite':!REDUCED_MOTION; }catch(e){ return true; } })();
+const WX_KIND=['meadow','sand','snow','ash','gloom'];
+const wxState={};
+function wxGet(id,W,H){
+  const kind=WX_KIND[curCont]||'meadow'; let st=wxState[id];
+  if(!st||st.kind!==kind||st.W!==W||st.H!==H) st=wxState[id]=wxMake(kind,W,H);
+  return st;
+}
+function wxMake(kind,W,H){
+  const r=Math.random, area=Math.max(0.6,W*H/(390*600)), parts=[], clouds=[];
+  const n=Math.round(({meadow:14,sand:22,snow:70,ash:45,gloom:20})[kind]*area);
+  for(let i=0;i<n;i++) parts.push(wxNew(kind,W,H,true));
+  const nc=kind==='gloom'?5:3;
+  for(let i=0;i<nc;i++) clouds.push({x:r()*W,y:r()*H,rad:(0.25+r()*0.3)*Math.max(W,H),vx:4+r()*7,a:kind==='gloom'?0.10:(kind==='snow'?0.05:0.07)});
+  return {kind,parts,clouds,W,H,last:0};
+}
+function wxNew(kind,W,H,anywhere){
+  const r=Math.random, p={x:r()*W,y:anywhere?r()*H:-10,ph:r()*6.28};
+  if(kind==='snow'){ p.vy=18+r()*22; p.vx=-6+r()*4; p.s=0.8+r()*1.8; }
+  else if(kind==='ash'){ if(r()<0.3){ p.ember=true; p.y=anywhere?r()*H:H+10; p.vy=-(12+r()*16); p.vx=-4+r()*8; p.s=0.9+r()*1.3; } else { p.vy=8+r()*10; p.vx=6+r()*6; p.s=1+r()*1.6; } }
+  else if(kind==='sand'){ p.x=anywhere?r()*W:-40; p.y=r()*H; p.vx=70+r()*70; p.vy=-3+r()*6; p.s=8+r()*18; }
+  else if(kind==='gloom'){ p.vx=-6+r()*12; p.vy=-6+r()*12; p.s=1.3+r()*1.2; }
+  else { p.vx=6+r()*8; p.vy=-2+r()*4; p.s=1+r()*1.1; }
+  return p;
+}
+function wxStepDraw(g,id,W,H,now){
+  const st=wxGet(id,W,H), dt=st.last?Math.min(0.1,(now-st.last)/1000):0, k=st.kind; st.last=now;
+  st.clouds.forEach(c=>{ c.x+=c.vx*dt; if(c.x-c.rad>W) c.x=-c.rad;
+    const gr=g.createRadialGradient(c.x,c.y,0,c.x,c.y,c.rad);
+    if(k==='gloom'){ gr.addColorStop(0,`rgba(175,185,215,${c.a})`); gr.addColorStop(1,'rgba(175,185,215,0)'); }
+    else { gr.addColorStop(0,`rgba(0,0,0,${c.a})`); gr.addColorStop(1,'rgba(0,0,0,0)'); }
+    g.fillStyle=gr; g.fillRect(c.x-c.rad,c.y-c.rad,c.rad*2,c.rad*2); });
+  for(let i=0;i<st.parts.length;i++){
+    const p=st.parts[i]; p.x+=p.vx*dt; p.y+=p.vy*dt; p.ph+=dt*2;
+    if(k==='gloom'){ if(p.x<-10) p.x=W+10; if(p.x>W+10) p.x=-10; if(p.y<-10) p.y=H+10; if(p.y>H+10) p.y=-10; if(Math.random()<0.02){ p.vx=-6+Math.random()*12; p.vy=-6+Math.random()*12; } }
+    else if(p.y>H+12||p.y<-14||p.x>W+40||p.x<-45){ st.parts[i]=wxNew(k,W,H,false); continue; }
+    if(k==='snow'){ g.fillStyle='rgba(255,255,255,0.85)'; g.beginPath(); g.arc(p.x+Math.sin(p.ph)*3,p.y,p.s,0,6.283); g.fill(); }
+    else if(k==='ash'){ if(p.ember){ g.fillStyle=`rgba(255,${130+Math.round(60*Math.sin(p.ph*3))},40,${0.55+0.35*Math.sin(p.ph*4)})`; g.beginPath(); g.arc(p.x,p.y,p.s,0,6.283); g.fill(); }
+      else { g.fillStyle='rgba(72,64,60,0.55)'; g.fillRect(p.x,p.y,p.s*1.6,p.s); } }
+    else if(k==='sand'){ g.strokeStyle='rgba(238,210,150,0.35)'; g.lineWidth=1; g.beginPath(); g.moveTo(p.x,p.y); g.lineTo(p.x+p.s,p.y+p.s*0.06); g.stroke(); }
+    else if(k==='gloom'){ const a=0.3+0.5*Math.max(0,Math.sin(p.ph*1.5)); g.fillStyle=`rgba(195,255,140,${a*0.25})`; g.beginPath(); g.arc(p.x,p.y,p.s*3.2,0,6.283); g.fill();
+      g.fillStyle=`rgba(215,255,165,${a})`; g.beginPath(); g.arc(p.x,p.y,p.s,0,6.283); g.fill(); }
+    else { g.fillStyle=`rgba(255,250,205,${0.45+0.3*Math.sin(p.ph)})`; g.beginPath(); g.arc(p.x,p.y+Math.sin(p.ph)*2,p.s,0,6.283); g.fill(); }
+  }
+}
+let mapAnimLast=0;
+function mapAnimLoop(now){
+  requestAnimationFrame(mapAnimLoop);
+  if(!animFull||!booted||view!=='map'||walkAnim||document.visibilityState!=='visible') return;
+  if(now-mapAnimLast<33) return; mapAnimLast=now; blitMapFrame(now);
+}
+requestAnimationFrame(mapAnimLoop);
+function setAnimMode(full){ animFull=full; try{ localStorage.setItem('morveyn_anim',full?'full':'lite'); }catch(e){} if(view==='map') renderMap(); }
+
+/* ================= ЗНАЧКИ ИНТЕРФЕЙСА =================
+   Нарисованы кодом в стиле карты (контур, 2–3 тона) вместо эмодзи, которые на разных телефонах выглядят по-разному. */
+const ICON_DRAW={
+  coin(g){ const gr=g.createLinearGradient(10,8,38,40); gr.addColorStop(0,'#ffe27a'); gr.addColorStop(1,'#c58a22'); g.fillStyle=gr; g.beginPath(); g.arc(24,24,17,0,6.283); g.fill(); g.stroke();
+    g.strokeStyle='rgba(120,70,10,0.7)'; g.beginPath(); g.arc(24,24,12,0,6.283); g.stroke(); g.fillStyle='#a8701a'; g.beginPath(); g.moveTo(24,15); g.lineTo(30,24); g.lineTo(24,33); g.lineTo(18,24); g.closePath(); g.fill();
+    g.strokeStyle='rgba(255,255,255,0.7)'; g.lineWidth=2; g.beginPath(); g.arc(24,24,14,3.6,4.6); g.stroke(); },
+  boot(g){ g.fillStyle='#8b5a2b'; g.beginPath(); g.moveTo(15,8); g.lineTo(28,8); g.lineTo(28,28); g.lineTo(40,32); g.quadraticCurveTo(43,36,40,40); g.lineTo(12,40); g.lineTo(13,26); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle='#4a2f17'; g.fillRect(12,37,29,4); g.strokeRect(12,37,29,4); g.fillStyle='#c79a5a'; g.fillRect(15,8,13,5); g.strokeRect(15,8,13,5); },
+  banner(g){ g.strokeStyle='#5a3a1a'; g.lineWidth=3; g.beginPath(); g.moveTo(13,6); g.lineTo(13,43); g.stroke(); g.lineWidth=2; g.strokeStyle='rgba(32,22,12,0.9)';
+    g.fillStyle='#b8352a'; g.beginPath(); g.moveTo(14,8); g.lineTo(39,8); g.lineTo(39,30); g.lineTo(27,24); g.lineTo(14,30); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle='#e9c46a'; g.beginPath(); g.arc(26,17,4,0,6.283); g.fill(); g.fillStyle='#e9c46a'; g.beginPath(); g.arc(13,6,3,0,6.283); g.fill(); },
+  sun(g){ g.fillStyle='#f2b33d'; for(let i=0;i<8;i++){ const a=i*Math.PI/4; g.save(); g.translate(24,24); g.rotate(a); g.beginPath(); g.moveTo(-3,-13); g.lineTo(0,-21); g.lineTo(3,-13); g.closePath(); g.fill(); g.restore(); }
+    const gr=g.createRadialGradient(21,21,2,24,24,12); gr.addColorStop(0,'#fff1a8'); gr.addColorStop(1,'#f0a02a'); g.fillStyle=gr; g.beginPath(); g.arc(24,24,11,0,6.283); g.fill(); g.stroke(); },
+  bag(g){ g.fillStyle='#c79a5a'; g.beginPath(); g.moveTo(17,16); g.quadraticCurveTo(6,30,12,40); g.lineTo(36,40); g.quadraticCurveTo(42,30,31,16); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle='#a87a3a'; g.beginPath(); g.moveTo(18,16); g.lineTo(30,16); g.lineTo(32,8); g.lineTo(16,8); g.closePath(); g.fill(); g.stroke(); g.strokeStyle='#5a3a1a'; g.lineWidth=3; g.beginPath(); g.moveTo(16,16); g.lineTo(32,16); g.stroke(); },
+  swords(g){ const blade=(rot)=>{ g.save(); g.translate(24,24); g.rotate(rot); g.fillStyle='#dfe4ea'; g.beginPath(); g.moveTo(-2.5,-20); g.lineTo(2.5,-20); g.lineTo(2.5,8); g.lineTo(0,12); g.lineTo(-2.5,8); g.closePath(); g.fill(); g.stroke();
+      g.fillStyle='#e9c46a'; g.fillRect(-8,8,16,3.5); g.strokeRect(-8,8,16,3.5); g.fillStyle='#6b4423'; g.fillRect(-2,11.5,4,7); g.restore(); };
+    blade(Math.PI*0.78); blade(-Math.PI*0.78); },
+  staff(g){ g.strokeStyle='#6b4423'; g.lineWidth=4; g.beginPath(); g.moveTo(12,42); g.lineTo(31,15); g.stroke(); g.lineWidth=2; g.strokeStyle='rgba(32,22,12,0.9)';
+    g.fillStyle='rgba(190,120,255,0.35)'; g.beginPath(); g.arc(33,13,10,0,6.283); g.fill(); g.fillStyle='#c98bff'; g.beginPath(); g.arc(33,13,6,0,6.283); g.fill(); g.stroke();
+    g.fillStyle='#fff'; [[42,6],[24,7],[42,22]].forEach(([x,y])=>{ g.beginPath(); g.arc(x,y,1.6,0,6.283); g.fill(); }); },
+  hourglass(g){ g.fillStyle='#6b4423'; g.fillRect(11,6,26,5); g.strokeRect(11,6,26,5); g.fillRect(11,37,26,5); g.strokeRect(11,37,26,5);
+    g.fillStyle='rgba(220,235,245,0.55)'; g.beginPath(); g.moveTo(14,11); g.lineTo(34,11); g.lineTo(26,24); g.lineTo(34,37); g.lineTo(14,37); g.lineTo(22,24); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle='#e9b84a'; g.beginPath(); g.moveTo(17,14); g.lineTo(31,14); g.lineTo(24,22); g.closePath(); g.fill(); g.beginPath(); g.moveTo(16,36); g.lineTo(32,36); g.lineTo(24,29); g.closePath(); g.fill(); },
+  compass(g){ g.fillStyle='#e9dcc0'; g.beginPath(); g.arc(24,24,18,0,6.283); g.fill(); g.stroke(); g.strokeStyle='#8b6a3a'; g.beginPath(); g.arc(24,24,14,0,6.283); g.stroke();
+    g.strokeStyle='rgba(32,22,12,0.9)'; g.fillStyle='#c0392b'; g.beginPath(); g.moveTo(24,10); g.lineTo(28,24); g.lineTo(20,24); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle='#f4f1ea'; g.beginPath(); g.moveTo(24,38); g.lineTo(28,24); g.lineTo(20,24); g.closePath(); g.fill(); g.stroke(); g.fillStyle='#e9c46a'; g.beginPath(); g.arc(24,24,2.5,0,6.283); g.fill(); },
+};
+const iconCache={};
+function iconURL(name){
+  if(iconCache[name]) return iconCache[name];
+  const cv=document.createElement('canvas'); cv.width=48; cv.height=48; const g=cv.getContext('2d');
+  g.lineJoin='round'; g.lineCap='round'; g.strokeStyle='rgba(32,22,12,0.9)'; g.lineWidth=2;
+  (ICON_DRAW[name]||ICON_DRAW.coin)(g);
+  return iconCache[name]=cv.toDataURL();
+}
+function applyIcons(){ document.querySelectorAll('[data-ico]').forEach(el=>{ el.style.backgroundImage=`url(${iconURL(el.dataset.ico)})`; }); }
 function camFor(r,c){ return {r:Math.max(0,Math.min(ROWS-VIEW_ROWS,r-Math.floor(VIEW_ROWS/2))), c:Math.max(0,Math.min(COLS-VIEW_COLS,c-Math.floor(VIEW_COLS/2)))}; }
 function startHeroWalk(path,done,tracks){
   if(gfxMode!=='new'||REDUCED_MOTION||path.length<2||view!=='map'){ done(); return; }
@@ -3581,6 +3769,7 @@ function walkFrame(now){
     const o=tr.obj===sorcerer?{k:'unitTok',x:'npc_sorcerer|#6b35a8'}:{k:'unitTok',x:(lairUnitKey(tr.obj)||'goblins')+'|#c0463f'};
     drawObject(g,o,(mc-camC)*T,(mr-camR)*T,T,screenDpr); });
   drawObject(g,onWater?{k:'ship'}:heroTok(),(hc-camC)*T,(hr-camR)*T+bob,T,screenDpr);
+  if(animFull) wxStepDraw(g,'map',W,H,now);
   drawAtmosphere(g,W,H);
   if(prog>=a.path.length-1){ walkAnim=null; const done=a.done; renderMap(); done(); return; }
   requestAnimationFrame(walkFrame);
@@ -3612,7 +3801,7 @@ function retreatPlan(){
   const enemies=stacks.filter(s=>s.side==='enemy'&&s.hp>0);
   const fastest=enemies.reduce((m,s)=>Math.max(m,bSpeed(s)),0);
   const base=(hardMode?0.4:0.2)*(1-Math.min(60,equipBonus('retreat'))/100);
-  return stacks.filter(s=>s.side==='player'&&s.hp>0).map(s=>{
+  return stacks.filter(s=>s.side==='player'&&s.hp>0&&!s.shadow).map(s=>{
     const u=bUnit(s), cnt=bCount(s), ratio=Math.max(0.5,Math.min(2,fastest/Math.max(1,bSpeed(s))));
     const lost=Math.min(cnt,Math.round(cnt*base*ratio));
     return {s,u,cnt,lost,ratio};
@@ -3686,7 +3875,9 @@ function openMenu(){
   const inBattle=view==='battle';
   ['saveBtn','loadBtn','statsBtn','restartBtn'].forEach(id=>document.getElementById(id).disabled=inBattle);
 }
-document.getElementById('menuBtn').onclick=()=>{ syncTipsBtn(); openMenu(); };
+function syncAnimBtn(){ document.getElementById('animBtn').textContent=`✨ Анимации: ${animFull?'полные':'упрощённые'}`; }
+document.getElementById('menuBtn').onclick=()=>{ syncTipsBtn(); syncAnimBtn(); openMenu(); };
+document.getElementById('animBtn').onclick=()=>{ setAnimMode(!animFull); syncAnimBtn(); };
 document.getElementById('hudMoreBtn').onclick=()=>{
   const m=document.getElementById('hudMore'), open=m.classList.toggle('hidden');
   document.getElementById('hudMoreBtn').textContent=open?'▾':'▴';
@@ -3757,6 +3948,7 @@ function openJournal(tab){
 document.getElementById('journalBtn').onclick=()=>{ closeModal(); openJournal(); };
 document.getElementById('questLogBtn').onclick=()=>{ closeModal(); openQuestLog(); };
 document.getElementById('challengeBtn').onclick=()=>{ closeModal(); openChallengeHub(); };
+document.getElementById('achBtn').onclick=()=>{ closeModal(); achSyncRun(); openAchievements(); };
 document.getElementById('pathBtn').onclick=()=>{ closeModal(); openPieces(false); };
 function bugReportText(){
   const tg=window.Telegram&&window.Telegram.WebApp;
@@ -3767,6 +3959,7 @@ function bugReportText(){
     `Экран: ${innerWidth}×${innerHeight}, ${isLandscape()?'горизонтально':'вертикально'}, окно ${VIEW_COLS}×${VIEW_ROWS}`,
     `Режим: ${hardMode?'жёсткий':'обычный'}; земля: ${contCfg().name}; день ${day}; экран: ${view}`,
     `Сохранение: ${CLOUD_OK?'облако Telegram':'устройство'}`,
+    `Код игрока: ${playerId||'определится после первой отправки статистики'}`,
     `Ошибки: ${recentErrors.length?recentErrors.join(' | '):'нет'}`,
     '',
     'Что произошло: '
@@ -3802,7 +3995,7 @@ const TIPS={
   day:'Ходы на сегодня кончились — нажмите <b>⏭️ День</b>. Каждое утро игра сохраняется сама.',
   workers:'Лес, скалы и воду убирают <b>работники</b>: 🪓 Лесоруб, ⛏️ Камнетёс, 🔨 Плотник. Нанимают их в гильдиях некоторых городов.',
   city:'В городе можно <b>нанять войска</b> и взять <b>поручение</b>. Размер армии ограничен <b>лидерством</b> 👥. В разных городах продаётся разное — всё увиденное записывается в 📖 Справочник (меню ☰).',
-  battle:'<b>Бой.</b> Отряд, чей ход, подсвечен золотым кольцом. Нажмите на клетку, чтобы пойти, или на врага в красной пунктирной обводке — отряд сам подойдёт и ударит. Стрелки бьют издалека. Можно «Ждать» или «Отступить» — но от быстрых врагов отступать дорого.',
+  battle:'<b>Бой.</b> Отряд, чей ход, подсвечен золотым кольцом. Нажмите на клетку, чтобы пойти, или на врага в красной пунктирной обводке — отряд сам подойдёт и ударит. Стрелки бьют издалека, но не стреляют, если к ним подошёл враг. Можно «Ждать» или «Отступить» — но от быстрых врагов отступать дорого.',
   defeat:'Поражение: армия отступила в столицу и ослабла. В обычном режиме неудачу можно переиграть — меню ☰ → «Загрузить».',
   week:'Прошла неделя: города и ваши замки приносят <b>доход</b>, а армия требует <b>содержания</b>. Следите, чтобы казна не опустела.',
   castle:'Это <b>вражеский замок</b> 🏴. Захват даёт часть карты земли; все 8 частей открывают путь в следующую землю. Перед штурмом прикиньте силу гарнизона.',
@@ -4122,6 +4315,7 @@ async function finishChallenge(){
   const res={week:challenge.week,state:'done',days:day,activeMs:Math.round(stats.playMs)};
   setChalStatus(res); writeSave('challenge');
   track('chal_finish',{week:res.week,days:res.days,min:Math.round(res.activeMs/60000)});
+  achAdd('challenges',1); achSyncRun();
   openChallengeResult();
   await submitScore();
   if(modalOpen()) openChallengeResult();
@@ -4130,8 +4324,9 @@ async function submitScore(){
   const st=chalStatus(); if(!st||st.state!=='done'||st.submitted) return;
   if(!tgInitData()){ st.note='Таблица рекордов работает в Telegram — результат сохранён только на этом устройстве.'; setChalStatus(st); return; }
   try{
-    const r=await apiPost('/scores',{week:st.week,days:st.days,active_ms:st.activeMs,hero:heroForWeek(st.week),v:GAME_VERSION,initData:tgInitData()});
-    if(r.status===200&&r.data){ Object.assign(st,{submitted:true,pending:false,note:'',rankDays:r.data.rank_days,rankTime:r.data.rank_time,total:r.data.total}); }
+    const r=await apiPost('/scores',{week:st.week,days:st.days,active_ms:st.activeMs,hero:heroForWeek(st.week),v:GAME_VERSION,initData:tgInitData(),title:achData.title||''});
+    if(r.status===200&&r.data){ Object.assign(st,{submitted:true,pending:false,note:'',rankDays:r.data.rank_days,rankTime:r.data.rank_time,total:r.data.total});
+      if(r.data.rank_days<=3||r.data.rank_time<=3){ achFlag('top3'); achCheck(); } }
     else if(r.status===409){ Object.assign(st,{submitted:true,pending:false,note:'Результат этой недели уже был отправлен.'}); }
     else Object.assign(st,{pending:false,note:'Сервер не принял результат ('+((r.data&&r.data.error)||r.status)+').'});
   }catch(e){ Object.assign(st,{pending:true,note:'Нет связи с сервером — результат отправится при следующем запуске.'}); }
@@ -4191,7 +4386,7 @@ function renderBoard(wk){
   const b=boardCache;
   if(!b){ openModal(`<h2>📊 Рекорды ${wk}</h2><div class="modalNote">Не удалось загрузить таблицу — проверьте связь.</div><button class="secondary" style="width:100%;margin-top:10px;" onclick="openChallengeHub()">Назад</button>`); return; }
   const rows=boardTab==='days'?b.top_days:b.top_time;
-  const list=rows.length?rows.map((x,i)=>`<div class="row" style="${x.me?'background:rgba(233,196,106,0.14);border-radius:6px;padding-left:6px;':''}"><span><b>#${i+1}</b> ${escHtml(x.name||'Игрок')} ${(HERO_CLASSES[x.hero]||{}).emoji||''}</span><span>${boardTab==='days'?`<b>${x.days} дн.</b> · ${fmtMs(x.active_ms)}`:`<b>${fmtMs(x.active_ms)}</b> · ${x.days} дн.`}</span></div>`).join('')
+  const list=rows.length?rows.map((x,i)=>`<div class="row" style="${x.me?'background:rgba(233,196,106,0.14);border-radius:6px;padding-left:6px;':''}"><span><b>#${i+1}</b> ${escHtml(x.name||'Игрок')}${x.title?` <span class="tagLeg">${escHtml(x.title)}</span>`:''} ${(HERO_CLASSES[x.hero]||{}).emoji||''}</span><span>${boardTab==='days'?`<b>${x.days} дн.</b> · ${fmtMs(x.active_ms)}`:`<b>${fmtMs(x.active_ms)}</b> · ${x.days} дн.`}</span></div>`).join('')
     :'<div class="armyline">Пока никто не прошёл испытание этой недели. Станьте первым!</div>';
   const me=b.me?`<div class="modalNote" style="color:var(--accent);margin-top:8px;">Вы: #${b.me.rank_days} по дням, #${b.me.rank_time} по времени (${b.me.days} дн., ${fmtMs(b.me.active_ms)}).</div>`
     :(tgInitData()?'':'<div class="modalNote" style="margin-top:8px;">Отправлять результаты можно только из Telegram.</div>');
@@ -4225,11 +4420,146 @@ function openUnitInfo(key,count){
       ${row('⚔️','Урон',`${u.dmg[0]}–${u.dmg[1]}`,'одного бойца за удар')}
       ${row('🛡️','Защита',u.def,`снижает входящий урон на ${cut}%`)}
       ${row('👣','Скорость',u.speed,`ход ${mr} кл., удар с подходом — до ${mr+1} кл.`)}
-      ${row(u.ranged?'🏹':'🗡️','Бой',u.ranged?'дальний':'ближний',u.ranged?'бьёт с любой дистанции; через препятствие −30%':'бьёт вплотную или подойдя')}
+      ${row(u.ranged?'🏹':'🗡️','Бой',u.ranged?'дальний':'ближний',u.ranged?'бьёт с любой дистанции, через препятствие −30%; если рядом враг — не стреляет, бьёт соседа вполсилы':'бьёт вплотную или подойдя')}
       ${row('👥','Лидерство',u.leadershipCost,'за одного бойца')}
       ${row('💰','Содержание',u.upkeep,'золота в неделю за бойца')}
     </div>${squad}
     <button class="secondary" style="margin-top:12px;width:100%;" onclick="closeModal()">Закрыть</button>`);
+}
+
+/* ================= КНИГА ДОСТИЖЕНИЙ И ЗВАНИЯ =================
+   Достижения общие для всех партий игрока: хранятся на устройстве и в облаке Telegram, новая игра их не сбрасывает.
+   Прогресс — счётчики за всё время (убийства, заклинания, замки…) и рекорды одной партии (золото, сундуки…).
+   Процент игроков, получивших достижение, считает сервер по событиям статистики. Звания — за отдельные достижения,
+   выбираются в книге и показываются рядом с именем в таблице испытания недели. */
+const ACH=[
+  // ⚔️ бой
+  {id:'first_blood',g:'⚔️ Бой',e:'🗡️',n:'Первая кровь',d:'Выиграть первый бой',c:p=>p.wins>=1},
+  {id:'wins_100',g:'⚔️ Бой',e:'🏆',n:'Ветеран',d:'Выиграть 100 боёв',goal:100,v:p=>p.wins,title:'Ветеран'},
+  {id:'slain_1000',g:'⚔️ Бой',e:'💀',n:'Тысяча павших',d:'Сразить 1000 врагов',goal:1000,v:p=>p.slain},
+  {id:'slain_10000',g:'⚔️ Бой',e:'☠️',n:'Бич врагов',d:'Сразить 10 000 врагов',goal:10000,v:p=>p.slain,title:'Бич врагов'},
+  {id:'dragons_10',g:'⚔️ Бой',e:'🐉',n:'Драконоборец',d:'Сразить 10 драконов',goal:10,v:p=>p.k_dragon||0,title:'Драконоборец'},
+  {id:'undead_300',g:'⚔️ Бой',e:'🕯️',n:'Изгоняющий тьму',d:'Сразить 300 нежити',goal:300,v:p=>p.f_undead||0,title:'Изгоняющий тьму'},
+  {id:'flawless',g:'⚔️ Бой',e:'🛡️',n:'Без единой царапины',d:'Победить равного или сильнее, не потеряв ни бойца',c:p=>p.flawless>=1},
+  {id:'underdog',g:'⚔️ Бой',e:'🦁',n:'Храбрец',d:'Победить врага вдвое сильнее вашей армии',c:p=>p.underdog>=1,title:'Храбрец'},
+  {id:'mutiny_win',g:'⚔️ Бой',e:'⛓️',n:'Укротитель',d:'Победить в бою, где часть армии взбунтовалась',c:p=>p.mutinyWin>=1},
+  // 🔮 магия
+  {id:'fire_50',g:'🔮 Магия',e:'🔥',n:'Пиромант',d:'Применить Огненный шар 50 раз',goal:50,v:p=>p.cast_fireball||0,title:'Пиромант'},
+  {id:'shadow_20',g:'🔮 Магия',e:'👤',n:'Повелитель теней',d:'Вызвать Теневые копии 20 раз',goal:20,v:p=>p.cast_multiply||0,title:'Повелитель теней'},
+  {id:'heal_50',g:'🔮 Магия',e:'✨',n:'Целитель',d:'Применить Исцеление или Воскрешение 50 раз',goal:50,v:p=>(p.cast_heal||0)+(p.cast_resurrect||0)},
+  {id:'magic_25',g:'🔮 Магия',e:'🪄',n:'Архимаг',d:'Довести магическую силу до 25',goal:25,v:p=>p.maxMagic||0,title:'Архимаг'},
+  {id:'tornado_5',g:'🔮 Магия',e:'🌪️',n:'Гроза колдуна',d:'Прогнать Чёрного Колдуна Смерчем 5 раз',goal:5,v:p=>p.cast_tornado||0},
+  // 🏰 завоевания
+  {id:'castle_1',g:'🏰 Завоевания',e:'🏯',n:'Первая крепость',d:'Захватить первый замок',c:p=>p.castles>=1},
+  {id:'castle_30',g:'🏰 Завоевания',e:'⚔️',n:'Гроза лордов',d:'Захватить 30 замков',goal:30,v:p=>p.castles,title:'Гроза лордов'},
+  {id:'land_0',g:'🏰 Завоевания',e:'🌿',n:'Морвейн покорён',d:'Покорить Морвейн',c:p=>p.land_0},
+  {id:'land_1',g:'🏰 Завоевания',e:'🏜️',n:'Сарнаг покорён',d:'Покорить Сарнаг',c:p=>p.land_1},
+  {id:'land_2',g:'🏰 Завоевания',e:'❄️',n:'Хрустальный Бор покорён',d:'Покорить Хрустальный Бор',c:p=>p.land_2},
+  {id:'land_3',g:'🏰 Завоевания',e:'🌋',n:'Пепелище покорено',d:'Покорить Пепелище',c:p=>p.land_3},
+  {id:'land_4',g:'🏰 Завоевания',e:'🌑',n:'Владыка пяти земель',d:'Покорить Тёмный Удел — все пять земель',c:p=>p.land_4,title:'Владыка пяти земель'},
+  {id:'hard_all',g:'🏰 Завоевания',e:'⚙️',n:'Железный',d:'Покорить все пять земель в жёстком режиме',c:p=>p.hardAll,title:'Железный'},
+  {id:'heroes_3',g:'🏰 Завоевания',e:'🎭',n:'Мастер на все руки',d:'Покорить землю каждым из трёх героев',c:p=>p.hero_knight&&p.hero_sorceress&&p.hero_ranger,title:'Мастер на все руки'},
+  // 🧭 странствия
+  {id:'walk_2000',g:'🧭 Странствия',e:'🥾',n:'Странник',d:'Пройти 2000 клеток',goal:2000,v:p=>p.walked||0,title:'Странник'},
+  {id:'sail_300',g:'🧭 Странствия',e:'⛵',n:'Мореход',d:'Проплыть 300 клеток',goal:300,v:p=>p.sailed||0,title:'Мореход'},
+  {id:'untouchable',g:'🧭 Странствия',e:'🌫️',n:'Неуловимый',d:'Покорить землю, ни разу не попавшись преследователям',c:p=>p.untouchable,title:'Неуловимый'},
+  {id:'chests_60',g:'🧭 Странствия',e:'🎁',n:'Кладоискатель',d:'Открыть 60 сундуков',goal:60,v:p=>p.chests||0,title:'Кладоискатель'},
+  {id:'quests_25',g:'🧭 Странствия',e:'📜',n:'Защитник городов',d:'Выполнить 25 поручений',goal:25,v:p=>p.quests||0},
+  // 👑 сокровища и армия
+  {id:'gold_20k',g:'👑 Сокровища и армия',e:'💰',n:'Казначей',d:'Добыть 20 000 золота',goal:20000,v:p=>p.gold||0,title:'Казначей'},
+  {id:'legend_1',g:'👑 Сокровища и армия',e:'⚜️',n:'Реликвия',d:'Добыть легендарный артефакт',c:p=>(p.legends||0)>=1},
+  {id:'legend_5',g:'👑 Сокровища и армия',e:'✦',n:'Хранитель реликвий',d:'Собрать все пять легендарных артефактов',goal:5,v:p=>p.legends||0,title:'Хранитель реликвий'},
+  {id:'army_300',g:'👑 Сокровища и армия',e:'🚩',n:'Полководец',d:'Вести армию на 300 лидерства без превышения',goal:300,v:p=>p.maxLead||0,title:'Полководец'},
+  {id:'challenge_1',g:'👑 Сокровища и армия',e:'🏅',n:'Участник испытания',d:'Пройти испытание недели',c:p=>p.challenges>=1},
+  {id:'challenge_top3',g:'👑 Сокровища и армия',e:'🥇',n:'Чемпион недели',d:'Войти в тройку испытания недели',c:p=>p.top3,title:'Чемпион недели'},
+];
+const ACH_KEY='morveyn_ach';
+let achData=(()=>{ try{ return JSON.parse(localStorage.getItem(ACH_KEY)||'null')||{unlocked:{},prog:{},title:''}; }catch(e){ return {unlocked:{},prog:{},title:''}; } })();
+let achStats=null, achToastQueue=[];
+function achSave(){ try{ localStorage.setItem(ACH_KEY,JSON.stringify(achData)); }catch(e){}
+  try{ const tg=window.Telegram&&window.Telegram.WebApp; if(tg&&tg.CloudStorage&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.9')) tg.CloudStorage.setItem('mvach',JSON.stringify(achData),()=>{}); }catch(e){} }
+/* Облако + устройство: объединяем (полученные — все, счётчики — по максимуму). */
+function achLoadCloud(){
+  try{ const tg=window.Telegram&&window.Telegram.WebApp; if(!(tg&&tg.CloudStorage&&tg.isVersionAtLeast&&tg.isVersionAtLeast('6.9'))) return;
+    tg.CloudStorage.getItem('mvach',(err,v)=>{ if(err||!v) return; try{ const c=JSON.parse(v);
+      Object.assign(achData.unlocked,c.unlocked||{}); Object.entries(c.prog||{}).forEach(([k,x])=>{ if(typeof x==='number') achData.prog[k]=Math.max(achData.prog[k]||0,x); else if(x) achData.prog[k]=x; });
+      if(!achData.title&&c.title) achData.title=c.title; achSave(); }catch(e){} }); }catch(e){}
+}
+function achAdd(key,n){ if(!n) return; achData.prog[key]=(achData.prog[key]||0)+n; }
+function achMax(key,v){ achData.prog[key]=Math.max(achData.prog[key]||0,v||0); }
+function achFlag(key){ achData.prog[key]=true; }
+function achDone(a){ const p=achData.prog; return a.c?!!a.c(p):(a.v(p)||0)>=a.goal; }
+/* Проверить все, выдать новые: событие в статистику, всплывающее уведомление. */
+function achCheck(){
+  let any=false;
+  ACH.forEach(a=>{ if(achData.unlocked[a.id]||!achDone(a)) return; achData.unlocked[a.id]=Date.now(); any=true;
+    track('achievement',{id:a.id}); achToastQueue.push(a); });
+  if(any){ achSave(); pumpAchToast(); } else achSave();
+}
+function pumpAchToast(){
+  if(!achToastQueue.length) return; const box=document.getElementById('tipBox'); if(!box.classList.contains('hidden')){ setTimeout(pumpAchToast,1500); return; }
+  const a=achToastQueue.shift();
+  document.getElementById('tipText').innerHTML=`🏅 <b>Достижение: ${a.n}</b><br>${a.d}${a.title?`<br>Открыто звание <b>«${a.title}»</b> — выберите его в книге достижений.`:''}
+    <br><button class="secondary" style="margin-top:6px;" onclick="closeTip();openAchShare('${a.id}')">📤 Поделиться</button>`;
+  box.classList.remove('hidden'); if(typeof placeTip==='function') placeTip(); tipShowing='ach';
+}
+async function achFetchStats(){
+  try{ const r=await apiPost('/achstats',{}); if(r.status===200&&r.data) achStats=r.data; }catch(e){}
+}
+function achPct(id){ if(!achStats||!achStats.total) return null; return Math.round(100*((achStats.counts||{})[id]||0)/achStats.total); }
+function titlesOwned(){ return ACH.filter(a=>a.title&&achData.unlocked[a.id]).map(a=>a.title); }
+function setTitle(t){ achData.title=t; achSave(); openAchievements(); }
+async function openAchievements(){
+  const got=ACH.filter(a=>achData.unlocked[a.id]).length, titles=titlesOwned();
+  const render=()=>{
+    const groups=[...new Set(ACH.map(a=>a.g))];
+    const body=groups.map(gname=>`<div class="statSection" style="margin-top:10px;">${gname}</div>`+ACH.filter(a=>a.g===gname).map(a=>{
+      const done=!!achData.unlocked[a.id], pct=achPct(a.id), v=a.v?Math.min(a.goal,a.v(achData.prog)||0):null;
+      return `<div class="row" style="opacity:${done?1:0.62};"><span><span style="font-size:18px;">${done?a.e:'🔒'}</span> <b>${a.n}</b>${a.title?` <span class="tagLeg">звание</span>`:''}<br>
+        <span style="color:var(--muted);font-size:12px;">${a.d}${!done&&v!==null?` · ${fmtNum(v)}/${fmtNum(a.goal)}`:''}${pct!==null?` · есть у ${pct}% игроков`:''}</span></span>
+        ${done?`<button class="secondary" style="padding:4px 8px;" onclick="openAchShare('${a.id}')">📤</button>`:''}</div>`; }).join('')).join('');
+    openModal(`<h2>🏅 Книга достижений</h2><div class="modalNote">Получено <b>${got}</b> из ${ACH.length}. Достижения общие для всех ваших походов.</div>
+      <div class="modalNote" style="margin-top:6px;color:var(--text);">Звание: ${titles.length?`<select onchange="setTitle(this.value)" style="background:var(--panel2);color:var(--text);border:1px solid var(--accent);border-radius:6px;padding:3px;">
+        <option value="">— без звания —</option>${titles.map(t=>`<option ${t===achData.title?'selected':''}>${t}</option>`).join('')}</select>`:'пока нет — их дают достижения с пометкой «звание»'}</div>
+      <div style="max-height:58vh;overflow-y:auto;margin-top:6px;">${body}</div>
+      <button class="secondary" style="width:100%;margin-top:10px;" onclick="closeModal()">Закрыть</button>`);
+  };
+  render(); if(!achStats){ await achFetchStats(); if(modalOpen()) render(); }
+}
+function achCardURL(a){
+  const W=640,H=300, cv=document.createElement('canvas'); cv.width=W; cv.height=H; const g=cv.getContext('2d');
+  const gr=g.createLinearGradient(0,0,0,H); gr.addColorStop(0,'#3a2b1d'); gr.addColorStop(1,'#1e160e'); g.fillStyle=gr; g.fillRect(0,0,W,H);
+  g.strokeStyle='#b8902f'; g.lineWidth=4; g.strokeRect(8,8,W-16,H-16);
+  const rg=g.createRadialGradient(130,150,10,130,150,90); rg.addColorStop(0,'#ffe58a'); rg.addColorStop(1,'#b8902f'); g.fillStyle=rg; g.beginPath(); g.arc(130,150,78,0,6.283); g.fill();
+  g.strokeStyle='#7a5a22'; g.lineWidth=4; g.stroke(); g.textAlign='center'; g.textBaseline='middle'; g.font='72px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; g.fillStyle='#000'; g.fillText(a.e,130,154);
+  g.textAlign='left'; g.textBaseline='alphabetic';
+  g.fillStyle='#e9c46a'; g.font='bold 18px Philosopher,Georgia,serif'; g.fillText(a.title?'Получено звание':'Достижение',240,90);
+  g.fillStyle='#f1e6cf'; g.font='bold 34px Philosopher,Georgia,serif'; g.fillText(a.title||a.n,240,134);
+  g.fillStyle='rgba(241,230,207,0.85)'; g.font='17px Philosopher,Georgia,serif'; g.fillText(a.d,240,168);
+  const pct=achPct(a.id); if(pct!==null){ g.fillStyle='#e9c46a'; g.font='bold 18px Philosopher,Georgia,serif'; g.fillText(`есть лишь у ${Math.max(1,pct)}% игроков`,240,204); }
+  g.fillStyle='rgba(241,230,207,0.6)'; g.font='14px Georgia,serif'; g.fillText('Морвейн — стратегия в Telegram',240,258);
+  return cv.toDataURL('image/png');
+}
+async function openAchShare(id){
+  const a=ACH.find(x=>x.id===id); if(!a) return; if(!achStats) await achFetchStats();
+  openModal(`<h2>📤 ${a.title?'Звание':'Достижение'}: ${a.title||a.n}</h2><img alt="" src="${achCardURL(a)}" style="width:100%;border-radius:8px;margin-top:4px;">
+    ${BOT_APP_URL?`<button style="width:100%;margin-top:10px;" onclick="shareAch('${a.id}')">📤 Отправить в Telegram</button>`:''}
+    <div class="modalNote" style="font-size:11.5px;margin-top:6px;">Картинку можно сохранить долгим нажатием.</div>
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="openAchievements()">К книге достижений</button>`);
+}
+function shareAch(id){
+  const a=ACH.find(x=>x.id===id); if(!a||!BOT_APP_URL) return; const pct=achPct(a.id);
+  const text=`🏅 ${a.title?`Получено звание «${a.title}»`:`Достижение «${a.n}»`} в «Морвейне» — ${a.d.toLowerCase()}.${pct!==null?` Его есть лишь у ${Math.max(1,pct)}% игроков!`:''} Сможешь так же?`;
+  const url=`https://t.me/share/url?url=${encodeURIComponent(BOT_APP_URL+'?startapp=ach')}&text=${encodeURIComponent(text)}`;
+  const tg=window.Telegram&&window.Telegram.WebApp; if(tg&&tg.initData&&tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url,'_blank');
+  track('ach_share',{id});
+}
+/* Сводка прогресса из текущей партии (рекорды одной партии и состояние) — вызывается регулярно. */
+function achSyncRun(){
+  achMax('chests',stats.chestsOpened); achMax('quests',stats.questsDone||0); achMax('gold',stats.goldEarned);
+  achMax('maxMagic',magicPower()); if(leadershipExcess()===0) achMax('maxLead',leadershipUsed());
+  achMax('legends',LEGEND_BY_LAND.filter(id=>ownsItem(id)).length);
+  achCheck();
 }
 
 const GAME_INTRO=`Пять земель по 80×60 клеток, каждая опаснее предыдущей. В каждой — 5 городов и 8 замков: покорите землю целиком, чтобы открыть путь к следующей. Между землями плавают из любой пристани — корабль плывёт с вами.`;
@@ -4282,7 +4612,7 @@ document.getElementById('nextDayBtn').onclick=()=>{
     msg+=` 📆 Неделя ${week}: доход +${income}💰, содержание армии -${upkeep}💰. Запасы найма пополнены.`;
     if(gold<0){ msg+=' ⚠️ Казна пуста!'; gold=0; }
   }
-  pendingRoute=null;
+  pendingRoute=null; achSyncRun();
   const nightIc=view==='map'?nightPursuit():null;
   updateHud(); setInfo(msg); renderMap();
   saveSoon(true);
@@ -4531,10 +4861,61 @@ function openStats(victory){
       <div class="funFacts">${facts.join('<br>')}</div>
       <div style="margin-top:12px;">
         ${gameOverPermanent?`<button class="secondary" onclick="showView('gameover')">↩️ Назад</button>`:`<button onclick="showView('map');renderMap();">↩️ К карте</button>`}
+        <button class="secondary" onclick="openShareProgress()">📤 Поделиться</button>
         ${victory?`<button class="secondary" onclick="document.getElementById('restartBtn').click()">🔄 Новый мир</button>`:''}
       </div>
       <div style="font-size:11px;color:var(--muted);margin-top:8px;">Сохранение: ${CLOUD_OK?'облако Telegram + устройство':'на этом устройстве'}.</div>
     </div>`;
+}
+/* ================= ПОДЕЛИТЬСЯ ПОХОДОМ =================
+   Карточка с героем, картой разведанной земли и итогами похода + отправка в чат Telegram со ссылкой на игру
+   (метка share — видно в статистике источников, сколько игроков пришло по таким ссылкам). */
+function landsConquered(){ return worlds.filter((w,i)=>w&&(i===curCont?landComplete:w.landComplete)).length; }
+function progressCardURL(){
+  tickPlaytime();
+  const W=640,H=360, cv=document.createElement('canvas'); cv.width=W; cv.height=H; const g=cv.getContext('2d'), S=stats, h=heroCls();
+  const gr=g.createLinearGradient(0,0,0,H); gr.addColorStop(0,'#3a2b1d'); gr.addColorStop(1,'#1e160e'); g.fillStyle=gr; g.fillRect(0,0,W,H);
+  g.strokeStyle='#b8902f'; g.lineWidth=4; g.strokeRect(8,8,W-16,H-16); g.strokeStyle='rgba(233,196,106,0.35)'; g.lineWidth=1; g.strokeRect(16,16,W-32,H-32);
+  // карта текущей земли: разведанное в цвете, остальное — тьма
+  const sc=2.4, mx=W-COLS*sc-34, my=96, P=pal(), col={g:P.grass[0],d:P.sand[0],s:P.swamp[0],w:P.water[0],f:P.tree[1],m:P.peak[1],r:P.road[0]};
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ g.fillStyle=isExplored(r,c)?(col[terrainGrid[r][c]]||P.grass[0]):'#120e0a'; g.fillRect(mx+c*sc,my+r*sc,sc+0.5,sc+0.5); }
+  pois.forEach(p=>{ if((p.type==='castle'||p.type==='governor')&&p.owner==='player'){ g.fillStyle='#4da3ff'; g.fillRect(mx+p.c*sc-3,my+p.r*sc-3,6,6); } });
+  g.fillStyle='#fff'; g.beginPath(); g.arc(mx+hero.col*sc,my+hero.row*sc,4,0,6.283); g.fill();
+  g.strokeStyle='#b8902f'; g.lineWidth=2; g.strokeRect(mx,my,COLS*sc,ROWS*sc);
+  g.fillStyle='rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(112,312,66,15,0,0,Math.PI*2); g.fill();
+  g.drawImage(sprite('fig',150,1,'hero_'+(HERO_CLASSES[heroClass]?heroClass:'classic')+'|0'),38,312-150*(0.78+SPR_H-1),150,150*SPR_H);
+  g.fillStyle='#e9c46a'; g.font='bold 24px Philosopher,Georgia,serif'; g.fillText('Морвейн · летопись похода',34,56);
+  const lines=[[`${h.name}, ${h.title} · ${heroLevel} ур.`,'#f1e6cf','16px'],[`${contCfg().name}`,'#e9c46a','bold 30px'],
+    [`покорено земель: ${landsConquered()} из 5`,'#f1e6cf','17px'],[`замков: ${capturedTotal()} · побед: ${S.battlesWon}`,'#f1e6cf','17px'],
+    [`день ${day} · в пути ${fmtMs(S.playMs)}`,'#f1e6cf','17px']];
+  const gaps=[40,40,28,28,28]; let y=112; lines.forEach(([t,c,f],i)=>{ g.fillStyle=c; g.font=`${f} Philosopher,Georgia,serif`; g.fillText(t,205,y); y+=gaps[i]; });
+  if(hardMode){ g.fillStyle='#e5534b'; g.font='bold 15px Philosopher,Georgia,serif'; g.fillText('⚔ жёсткий режим',205,y+2); }
+  g.fillStyle='rgba(241,230,207,0.6)'; g.font='14px Georgia,serif'; g.fillText('Морвейн — стратегия в Telegram',205,322);
+  return cv.toDataURL('image/png');
+}
+function progressShareText(){
+  const S=stats, h=heroCls(), done=landsConquered(), fem=heroClass==='sorceress';
+  const conq=worlds.map((w,i)=>w&&(i===curCont?landComplete:w.landComplete)?CONTINENTS[i].name:null).filter(Boolean);
+  const where=done>=5?`покорил${fem?'а':''} все пять земель`
+    :done>0?`покорил${fem?'а':''} ${conq.map(n=>'«'+n+'»').join(', ')}${(curCont===CONTINENTS.length-1||landComplete)?'':` и ${fem?'дошла':'дошёл'} до земли «${contCfg().name}»`}`
+    :`${fem?'идёт':'идёт'} покорять «${contCfg().name}»`;
+  return `⚔️ Мой поход в «Морвейне»: ${h.name} ${where} — ${capturedTotal()} замков, ${S.battlesWon} побед за ${day} дн.${hardMode?' В жёстком режиме!':''} Попробуй сам:`;
+}
+function openShareProgress(){
+  openModal(`<h2>📤 Поделиться походом</h2>
+    <img alt="Карточка похода" src="${progressCardURL()}" style="width:100%;border-radius:8px;margin-top:4px;">
+    <div class="modalNote" style="color:var(--text);margin-top:8px;">${progressShareText()}</div>
+    ${BOT_APP_URL?`<button style="width:100%;margin-top:10px;" onclick="shareProgress()">📤 Отправить в Telegram</button>`:''}
+    <div class="modalNote" style="font-size:11.5px;margin-top:6px;">Картинку можно сохранить долгим нажатием и приложить к сообщению или истории.</div>
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeModal()">Закрыть</button>`);
+  track('share_open',{land:curCont});
+}
+function shareProgress(){
+  if(!BOT_APP_URL) return;
+  const url=`https://t.me/share/url?url=${encodeURIComponent(BOT_APP_URL+'?startapp=share')}&text=${encodeURIComponent(progressShareText())}`;
+  const tg=window.Telegram&&window.Telegram.WebApp;
+  if(tg&&tg.initData&&tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url,'_blank');
+  track('share_progress',{land:curCont,lands:landsConquered(),day});
 }
 document.getElementById('statsBtn').onclick=()=>{ if(view==='battle') return; closeModal(); openStats(false); };
 
@@ -4608,6 +4989,7 @@ function loadSlot(slot){
 }
 
 async function bootGame(){
+  applyIcons(); getPlayerId(); achLoadCloud(); // код игрока — сразу, чтобы он был в отчёте об ошибке
   track('session_start',{screen:`${innerWidth}x${innerHeight}`,lang:navigator.language,returning:!!localStorage.getItem(SAVE_KEY),src:startSource()});
   showView('map'); layoutViewport();
   setInfo('⏳ Загрузка сохранения...');
