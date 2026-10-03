@@ -283,7 +283,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.27.0-gfx', GAME_BUILD='2026-10-01';
+const GAME_VERSION='0.27.1-gfx', GAME_BUILD='2026-10-01';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -441,11 +441,11 @@ function pickN(arr,n,rng){
 }
 
 const SPELLS=[
-  {key:'heal',name:'Исцеление',cost:80,emoji:'✨',desc:'Лечит отряд на 20% +1% за очко МС (до 60%)',reqMagic:0},
+  {key:'heal',name:'Исцеление',cost:80,emoji:'✨',desc:'Возвращает павших в этом бою: 20% отряда +1% за очко МС (до 60%), не больше, чем было в начале боя',reqMagic:0},
   {key:'fireball',name:'Огненный шар',cost:120,emoji:'🔥',desc:'30 урона +6 за очко МС — по самому большому вражескому отряду',reqMagic:0},
   {key:'haste',name:'Ускорение',cost:60,emoji:'💨',desc:'До конца боя +2 клетки хода (+1 за каждые 10 МС) и место раньше в очереди; ход не тратится',reqMagic:5},
   {key:'multiply',name:'Теневые копии',cost:100,emoji:'👤',desc:'Рядом встаёт тень отряда: 15% бойцов +1% за очко МС (до 40%), 70% урона и здоровья, исчезает после боя. Раз на отряд за бой',reqMagic:8},
-  {key:'resurrect',name:'Воскрешение',cost:130,emoji:'💫',desc:'Восстанавливает отряд до 50% +2% за очко МС (до 100%)',reqMagic:10},
+  {key:'resurrect',name:'Воскрешение',cost:130,emoji:'💫',desc:'Поднимает отряд до 50% +2% за очко МС (до 100%) от численности в начале боя',reqMagic:10},
   {key:'infection',name:'Зараза',cost:110,emoji:'🦠',desc:'35 урона +7 за очко МС самому большому врагу и 15 +3 за очко — соседям',reqMagic:8},
 ];
 const ADV_SPELLS=[
@@ -2339,7 +2339,7 @@ function beginBattle(enc){
   lastBattleEnemyPower=power(enc.enemies,false);
   const mine=activeStacks(), prows=bSlotRows(mine.length);
   normalizeArmy();
-  stacks=mine.map((a,i)=>({id:'p'+a.id,side:'player',key:a.key,hp:a.hp,startHp:a.hp,maxHp:Math.max(a.max,a.hp),row:prows[i],col:0,armyId:a.id}));
+  stacks=mine.map((a,i)=>({id:'p'+a.id,side:'player',key:a.key,hp:a.hp,startHp:a.hp,maxHp:a.hp,row:prows[i],col:0,armyId:a.id}));
   const erows=bSlotRows(enc.enemies.length);
   enc.enemies.forEach((e,i)=>{ const hp=e.count*UNITS[e.key].hp; stacks.push({id:'e'+i,side:'enemy',key:e.key,hp:hp,maxHp:hp,row:erows[i],col:BF_COLS-1}); });
   bfx=[]; bVis={}; bObst=[]; bScene=makeBattleScene(enc); bObst=genObstacles(bScene);
