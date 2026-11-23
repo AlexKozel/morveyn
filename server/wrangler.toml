@@ -1,0 +1,20 @@
+# Сервер «Морвейна» на Cloudflare Workers
+name = "morveyn-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+# Адрес(а) игры, с которых разрешены запросы. Через запятую, без слэша в конце.
+# Пример: https://ваш-логин.github.io
+ALLOWED_ORIGINS = "https://alexkozel.github.io"
+BOT_APP_URL = "https://t.me/morveyn_game_bot/PlayMorveyn"
+CHANNEL_URL = "https://t.me/morveynRPG"
+GROUP_URL = "https://t.me/+to-YZ0feA7xjODBi"
+FEEDBACK_USERNAME = "lloyd3101"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "morveyn"
+database_id = "010ebd6b-cd05-4b36-acc3-17b8790522b8"
+
+# Токен бота хранится как секрет, НЕ здесь:  npx wrangler secret put BOT_TOKEN

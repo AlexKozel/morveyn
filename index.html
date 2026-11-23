@@ -292,6 +292,7 @@
     <button id="inviteBtn" class="secondary">👥 Пригласить друга</button>
     <button id="achBtn" class="secondary">🏅 Достижения</button>
     <button id="challengeBtn" class="secondary">🏆 Испытание недели</button>
+    <button id="bossBtn" class="secondary">👹 Мировой босс</button>
     <button id="questLogBtn" class="secondary">📜 Поручения</button>
     <button id="pathBtn" class="secondary">🧩 Карта пути</button>
     <button id="journalBtn" class="secondary">📖 Справочник городов</button>
@@ -307,7 +308,7 @@
 
 <script>
 /* ================= VERSION / DIAGNOSTICS ================= */
-const GAME_VERSION='0.40.0-proto', GAME_BUILD='2026-11-23';
+const GAME_VERSION='0.41.0-proto', GAME_BUILD='2026-11-24';
 // Telegram-ник разработчика без @ — для кнопки «Написать разработчику». Пусто = кнопка скрыта, отчёт можно только скопировать.
 const FEEDBACK_USERNAME='lloyd3101';
 const recentErrors=[];
@@ -2705,19 +2706,20 @@ function beginBattle(enc){
   else if(hardMode){ const seed=(Date.now()^Math.floor(Math.random()*1e9))>>>0; rngFn=mulberry32(seed); enc._seed=seed; }
   /* Жёсткий режим: бой сохраняется в момент начала. Закрыли игру посреди боя — при запуске вернётесь в этот же бой
      с начала (уклониться или отложить нельзя). Удача та же: тем же действиям — те же броски. Повтор бесплатный. */
-  if(hardMode&&!resuming){
+  if(hardMode&&!resuming&&!bossFight){
     const ref=curEncounter&&curEncounter.ref;
     pendingFight={type:curEncounter?curEncounter.type:'lair',r:ref?ref.r:hero.row,c:ref?ref.c:hero.col,wall:currentWallBonus,
       enc:JSON.parse(JSON.stringify({name:enc.name,enemies:enc.enemies})),key:challenge?('b|'+hero.row+','+hero.col+'|'+challenge.attempts[hero.row+','+hero.col]):null,seed:enc._seed||0};
     delete enc._seed; writeSave('auto');
   }
-  logLines=[]; battleOver=false; showTip('battle');
+  logLines=[]; battleOver=false; bRound=1; showTip('battle');
   lastBattleEnemyPower=power(enc.enemies,false);
   const mine=activeStacks(), prows=bSlotRows(mine.length);
   normalizeArmy();
   stacks=mine.map((a,i)=>({id:'p'+a.id,side:'player',key:a.key,hp:a.hp,startHp:a.hp,maxHp:a.hp,row:prows[i],col:0,armyId:a.id}));
   const erows=bSlotRows(enc.enemies.length);
   enc.enemies.forEach((e,i)=>{ const hp=e.count*UNITS[e.key].hp; stacks.push({id:'e'+i,side:'enemy',key:e.key,hp:hp,maxHp:hp,row:erows[i],col:BF_COLS-1}); });
+  if(bossFight) bossSetupStack();
   bfx=[]; bVis={}; bObst=[]; bScene=makeBattleScene(enc); bObst=genObstacles(bScene);
   battleHadMutiny=false; victoryDone=false; battleStartPow=stacks.filter(x=>x.side==='player').reduce((a,x)=>a+bCount(x)*(bUnit(x).hp+bUnit(x).dmg[1]),0);
   bLog(`⚔️ Бой у «${enc.name}» начался!`);
@@ -2732,7 +2734,10 @@ function bBuildOrder(){ order=stacks.filter(s=>s.hp>0).slice().sort((a,b)=>bSpee
 function bProcessTurn(){
   if(battleOver) return;
   while(idx<order.length && !stacks.find(s=>s.id===order[idx].id && s.hp>0)) idx++;
-  if(idx>=order.length){ bBuildOrder(); if(order.length===0){ renderBattle(); return; } }
+  if(idx>=order.length){ bRound++;
+    if(bossFight&&bRound>BOSS_ROUNDS){ battleOver=true; bossEnd('time'); renderBattle(); return; }
+    if(bossFight) bLog(`⏳ Раунд ${bRound} из ${BOSS_ROUNDS}`);
+    bBuildOrder(); if(order.length===0){ renderBattle(); return; } }
   renderBattle();
   const cur=stacks.find(s=>s.id===order[idx].id);
   if(cur.side==='enemy') setTimeout(()=>aiAct(cur),700);
@@ -2740,6 +2745,7 @@ function bProcessTurn(){
 function bEndTurn(){ idx++; checkBattleEnd(); if(!battleOver) bProcessTurn(); else renderBattle(); }
 function checkBattleEnd(){
   const p=stacks.some(s=>s.side==='player'&&s.hp>0), e=stacks.some(s=>s.side==='enemy'&&s.hp>0);
+  if(bossFight){ const b=stacks.find(s=>s.boss); if(!p||!b||b.hp<=0){ battleOver=true; bossEnd(!p?'wiped':'kill'); } return; }
   if(!p){ battleOver=true; onDefeat(); } else if(!e){ battleOver=true; onVictory(); }
 }
 function checkLevelUp(){
@@ -2827,11 +2833,12 @@ function onDefeat(){
 function doAttack(att,def,fxDelay){
   const au=bUnit(att), du=bUnit(def), cnt=bCount(att);
   const roll=Math.floor(R()*(au.dmg[1]-au.dmg[0]+1))+au.dmg[0] + (att.side==='player'?equipBonus('dmg')+(au.ranged?equipBonus('rangedDmg'):0):enemyBonus('dmg')+(au.ranged?enemyBonus('rangedDmg'):0));
-  const defVal=du.def + (def.side==='player'?equipBonus('def'):0) + (def.side==='enemy'?currentWallBonus+enemyBonus('def')+contTier():0);
+  const defVal=du.def + (def.side==='player'?equipBonus('def'):0) + (def.side==='enemy'&&!def.boss?currentWallBonus+enemyBonus('def')+contTier():0);
   let dmg=Math.round(cnt*roll*(1-Math.min(0.7,defVal*0.05))); dmg=Math.max(cnt,dmg);
   const isShot=au.ranged&&dist(att,def)>1, cover=isShot&&shotCovered(att,def);
   if(isShot&&def.side==='player'&&equipBonus('shotDef')>0) dmg=Math.max(1,Math.round(dmg*(1-Math.min(60,equipBonus('shotDef'))/100)));
   if(isShot&&def.side==='enemy'&&enemyBonus('shotDef')>0) dmg=Math.max(1,Math.round(dmg*(1-Math.min(60,enemyBonus('shotDef'))/100)));
+  if(att.boss) dmg=bossHitDmg(1); // удар босса — доля от всей армии, а не «число × урон»
   if(att.shadow) dmg=Math.max(1,Math.round(dmg*0.7)); // тень бьёт слабее
   if(att.key==='pikemen'&&ANTI_CAV.includes(def.key)) dmg=Math.round(dmg*1.5); // копья против всадников и крупных зверей
   const rangedMelee=au.ranged&&!isShot; if(rangedMelee) dmg=Math.max(1,Math.round(dmg*0.5)); // стрелок врукопашную — вполсилы
@@ -2846,6 +2853,7 @@ function doAttack(att,def,fxDelay){
     const dCnt=bCount(def), rroll=Math.floor(R()*(du.dmg[1]-du.dmg[0]+1))+du.dmg[0] + (def.side==='player'?equipBonus('dmg'):0);
     const atkDefVal=au.def + (att.side==='player'?equipBonus('def'):0);
     let rdmg=Math.round(dCnt*rroll*(1-Math.min(0.7,atkDefVal*0.05))*0.7); rdmg=Math.max(1,rdmg);
+    if(def.boss) rdmg=bossHitDmg(BOSS_RET/BOSS_HIT);
     att.hp-=rdmg;
     fxAttack(def,att,rdmg,false,(fxDelay||0)+380);
     bLog(`${du.emoji} «${du.name}» отвечает: -${rdmg} «${au.name}»`);
@@ -2854,7 +2862,7 @@ function doAttack(att,def,fxDelay){
 }
 function aiAct(stack){
   if(battleOver) return;
-  if(stack.key!=='dragon' && stack.hp<stack.maxHp*0.3 && R()<0.4){
+  if(stack.key!=='dragon' && !stack.boss && stack.hp<stack.maxHp*0.3 && R()<0.4){
     // бегство: отряд убегает за край поля со своей стороны — видно, что он сбежал, а не погиб
     const r0=stack.row, c0=stack.col, path=[{row:r0,col:c0}];
     for(let c=c0+1;c<=BF_COLS;c++) path.push({row:r0,col:Math.min(c,BF_COLS+0.6)});
@@ -3307,8 +3315,8 @@ function drawBattleCanvas(now){
     // вспышка попадания
     const hit=bfx.find(f=>f.type==='hit'&&f.id===s.id&&now>=f.t0&&now-f.t0<f.dur);
     // фигура: ноги на подставке (локальная «земля» спрайта — 0.78 клетки + запас сверху), враги смотрят влево
-    const sz=1.2*(UNIT_SIZE[s.key]||1), fimg=figImg(s.key);
-    if(fimg){ const h=cell*1.08*(UNIT_SIZE[s.key]||1), w=h*fimg.width/fimg.height, by=cy+cell*0.3;
+    const bsz=s.boss?1.55:1, sz=1.2*(UNIT_SIZE[s.key]||1)*bsz, fimg=figImg(s.key);
+    if(fimg){ const h=cell*1.08*(UNIT_SIZE[s.key]||1)*bsz, w=h*fimg.width/fimg.height, by=cy+cell*0.3;
       g.save(); g.globalAlpha*=FIG_ALPHA[s.key]||1; if(s.side==='enemy'){ g.translate(cx,0); g.scale(-1,1); g.translate(-cx,0); } g.drawImage(fimg,cx-w/2,by-h,w,h); g.restore(); }
     else { const fig=sprite('fig',cell*sz,dpr,s.key+'|'+(s.side==='enemy'?1:0)), cs=Math.round(cell*sz);
     g.drawImage(fig,cx-cs/2,cy+cell*0.24-cs*(0.78+SPR_H-1),cs,cs*SPR_H); }
@@ -3317,7 +3325,7 @@ function drawBattleCanvas(now){
     if(s.haste&&s.hp>0){ g.textAlign='center'; g.textBaseline='middle'; g.font=`${Math.round(cell*0.24)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; g.fillStyle='#000'; g.fillText('💨',cx-cell*0.34,cy+cell*0.22); }
     // число бойцов и здоровье — по «видимому» состоянию; у погибшего отряда их нет, тает только фигура
     if(v.shownN>0){
-    const n=String(v.shownN), pw=Math.max(cell*0.3,cell*0.13*n.length+cell*0.12), ph=cell*0.24, px=cx+cell*0.42-pw, py=cy+cell*0.12;
+    const n=s.boss?fmtK(v.shownHp):String(v.shownN), pw=Math.max(cell*0.3,cell*0.13*n.length+cell*0.12), ph=cell*0.24, px=cx+cell*0.42-pw, py=cy+cell*0.12;
     g.fillStyle=s.shadow?'#4a3378':s.side==='player'?'#2c5a8f':'#8f2d28'; pathRoundRect(g,px,py,pw,ph,[ph/2,ph/2,ph/2,ph/2]); g.fill();
     g.strokeStyle='rgba(255,255,255,0.6)'; g.lineWidth=1; g.stroke();
     g.fillStyle='#fff'; g.font=`bold ${Math.round(cell*0.17)}px sans-serif`; g.fillText(n,px+pw/2,py+ph/2+0.5);
@@ -4531,6 +4539,9 @@ function retreatPlan(){
 }
 function confirmRetreat(){
   if(battleOver||view!=='battle') return;
+  if(bossFight){ openModal(`<h2>🏳️ Закончить попытку?</h2><div class="modalNote" style="color:var(--text);">Нанесённый урон засчитается. Половина павших вернётся, как и в конце боя.</div>
+    <button style="width:100%;margin-top:10px;" onclick="closeModal();if(!battleOver){battleOver=true;bossEnd('retreat');renderBattle();}">🏳️ Закончить</button>
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeModal()">⚔️ Продолжить</button>`); return; }
   const cur=order[idx] && stacks.find(s=>s.id===order[idx].id && s.hp>0);
   if(!cur||cur.side!=='player') return;
   const plan=retreatPlan(), total=plan.reduce((a,p)=>a+p.lost,0);
@@ -4556,6 +4567,117 @@ function doRetreat(){
   setTimeout(()=>{ showView('map'); renderMap(); setInfo(parts.length?`🏳️ Вы отступили. Потери при бегстве: ${parts.join(', ')}.`:'🏳️ Вы отступили без потерь — враги не успели догнать.'); },1000);
 }
 document.getElementById('retreatBtn').onclick=confirmRetreat;
+/* ================= МИРОВОЙ БОСС НЕДЕЛИ =================
+   Один на неделю для всех (сервер: /boss, /boss/hit). Попытка — 10 раундов; урон всех игроков суммируется.
+   Одна попытка в сутки (по UTC). Потери настоящие, но половина павших возвращается; поражение здесь не
+   заканчивает игру даже в жёстком режиме. Убили за неделю — каждому участнику посылка с золотом.
+   Удар босса — доля от здоровья всей армии на начало боя (иначе одинокий гигант с «×1» был бы безобиден).
+   Защита босса одинакова на всех землях — честно для всех игроков. */
+const BOSS_ROUNDS=10, BOSS_HIT=0.045, BOSS_RET=0.015;
+const BOSS_INFO={
+  dragon:{name:'Древний дракон',emoji:'🐉',tale:'Он спал под горами со времён, когда земли ещё не имели имён. Теперь он проснулся — и голоден.'},
+  giants:{name:'Титан Горного Хребта',emoji:'⛰️',tale:'Каждый его шаг — землетрясение. Говорят, горы — это его уснувшие братья.'},
+  liches:{name:'Архилич',emoji:'💀',tale:'Король-Лич был лишь его учеником. Архилич собирает души павших героев.'},
+  demons:{name:'Повелитель Бездны',emoji:'😈',tale:'Трещина в небе открылась, и оттуда шагнул тот, кому нет имени на языке людей.'},
+  cyclopes:{name:'Циклоп-исполин',emoji:'👁️',tale:'Его единственный глаз видит армии за десять лиг. Спрятаться не выйдет.'},
+  trolls:{name:'Король троллей',emoji:'👑',tale:'Раны на нём затягиваются на глазах. Бить нужно всем вместе и без передышки.'}};
+let bossState=null, bossFight=null, bRound=0;
+function fmtK(n){ n=Math.max(0,Math.round(n)); return n>=1e6?(n/1e6).toFixed(1).replace('.0','')+'M':n>=1e4?Math.round(n/1e3)+'k':String(n); }
+function bossUtcDay(){ return new Date().toISOString().slice(0,10); }
+function bossHitDmg(k){ return Math.max(1,Math.round(bossFight.armyHp*BOSS_HIT*k*(0.85+R()*0.3))); }
+async function bossFetch(){
+  try{ const r=await apiPost('/boss',{initData:tgInitData()||undefined}); if(r.status===200&&r.data&&r.data.week){ bossState=r.data; return r.data; } }catch(e){}
+  return null;
+}
+function bossNextUtcText(){ const d=new Date(); d.setUTCHours(24,0,0,0); return d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}); }
+function bossBlock(st){
+  if(challenge) return 'Во время испытания недели босс недоступен — вернитесь в кампанию.';
+  if(view==='battle') return 'Сначала закончите текущий бой.';
+  if(!activeStacks().length) return 'Нужна армия: поставьте хотя бы один отряд в бой.';
+  if(!st) return 'Нет связи с сервером — босс доступен только онлайн.';
+  if(!tgInitData()) return 'Урон засчитывается только в игре внутри Telegram.';
+  if(st.killed) return 'Босс этой недели повержен. Новый придёт в понедельник.';
+  if(st.me&&st.me.today) return `Сегодняшняя попытка использована. Следующая — после ${bossNextUtcText()}.`;
+  return '';
+}
+async function openBoss(){
+  closeModal(); openModal(`<h2>👹 Мировой босс</h2><div class="modalNote">Узнаём, где он…</div>`);
+  const st=await bossFetch(); renderBossHub(st);
+}
+function renderBossHub(st){
+  const key=st?st.key:'dragon', info=BOSS_INFO[key]||BOSS_INFO.dragon, left=st?Math.max(0,st.hp-st.dmg):0, pct=st?Math.round(100*left/Math.max(1,st.hp)):100;
+  const img=figURL(key,96,96), block=bossBlock(st);
+  const top=st&&st.top&&st.top.length?st.top.map((t,i)=>`<div class="row" style="${t.me?'background:rgba(233,196,106,0.14);border-radius:6px;padding-left:6px;':''}"><span><b>#${i+1}</b> ${escHtml(t.name)}</span><span>${fmtNum(t.dmg)}</span></div>`).join('')
+    :'<div class="modalNote">Пока никто не бросил ему вызов — станьте первым.</div>';
+  openModal(`<h2>${info.emoji} ${info.name}</h2>
+    <div style="display:flex;gap:10px;align-items:center;">${img?`<img alt="" src="${img}" style="width:72px;height:72px;object-fit:contain;transform:scaleX(-1);">`:''}
+      <div class="modalNote" style="color:var(--text);margin:0;">${info.tale}</div></div>
+    ${st?`<div style="margin-top:10px;font-size:13px;">${st.killed?'☠️ <b>Повержен!</b> Награды разосланы посылками.':`Здоровье: <b>${fmtNum(left)}</b> из ${fmtNum(st.hp)} (${pct}%)`}</div>
+    <div style="height:10px;background:rgba(0,0,0,.45);border-radius:5px;overflow:hidden;margin-top:4px;"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#c0392b,#e8653b);"></div></div>
+    <div class="modalNote" style="margin-top:4px;">Участников: ${st.participants} · неделя ${st.week}${st.me?` · ваш вклад: <b>${fmtNum(st.me.dmg)}</b>`:''}</div>`:''}
+    <h3 style="margin:10px 0 4px;font-size:14px;">Больше всех урона</h3>${top}
+    <div class="modalNote" style="margin-top:8px;">Бой — ${BOSS_ROUNDS} раундов, одна попытка в сутки. Урон всех игроков складывается. Потери настоящие, но половина павших вернётся; поражение не заканчивает игру даже в жёстком режиме. Убьём за неделю — каждый участник получит золото посылкой (больше вклад — больше доля, добившему — бонус). Не успеем — наград нет ни у кого.</div>
+    ${block?`<div class="modalNote" style="color:var(--accent);margin-top:8px;">${block}</div>`:''}
+    <button style="width:100%;margin-top:10px;" ${block?'disabled':''} onclick="bossStart(false)">⚔️ В бой — попытка на сегодня</button>
+    ${adminOn()&&!challenge&&activeStacks().length?'<button class="secondary" style="width:100%;margin-top:8px;" onclick="bossStart(true)">🛠 Тренировочный бой (без зачёта)</button>':''}
+    <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeModal()">Закрыть</button>`);
+}
+function bossStart(practice){
+  const st=bossState;
+  if(!practice&&bossBlock(st)) return;
+  const key=st?st.key:'dragon', info=BOSS_INFO[key]||BOSS_INFO.dragon;
+  const remain=practice?100000:Math.max(1,st.hp-st.dmg);
+  closeModal();
+  bossFight={practice,key,week:st?st.week:'',remain,pow:Math.round(power(army,true)),armyHp:0,done:false};
+  if(!practice) try{ localStorage.setItem('morveyn_boss_day',bossUtcDay()); }catch(e){}
+  curEncounter={type:'boss',ref:null}; currentWallBonus=0;
+  track('boss_start',{key,practice:practice?1:0});
+  beginBattle({name:info.name,enemies:[{key,count:1}]});
+}
+function bossSetupStack(){
+  const b=stacks.find(s=>s.side==='enemy'); if(!b) return;
+  b.boss=true; b.hp=b.maxHp=b.startHp=bossFight.remain; b.hpMul=bossFight.remain/UNITS[b.key].hp;
+  b.row=Math.floor(BF_ROWS/2);
+  bossFight.armyHp=stacks.filter(s=>s.side==='player').reduce((a,s)=>a+s.hp,0);
+  setTimeout(()=>bLog(`👹 ${BOSS_INFO[bossFight.key].name}: у него ${fmtNum(bossFight.remain)} здоровья. У вас ${BOSS_ROUNDS} раундов.`),0);
+}
+function bossEnd(reason){
+  const bf=bossFight; if(!bf||bf.done) return; bf.done=true;
+  const b=stacks.find(s=>s.boss), dmg=Math.max(0,Math.round(bf.remain-Math.max(0,b?b.hp:0)));
+  // потери: половина павших возвращается
+  const start={}; stacks.filter(s=>s.side==='player'&&!s.shadow&&s.armyId!=null).forEach(s=>{ start[s.armyId]=Math.ceil((s.startHp||0)/UNITS[s.key].hp); });
+  syncArmyFromBattle(); battleCasualties();
+  let lost=0, back=0;
+  army.forEach(a=>{ if(start[a.id]==null) return; const u=UNITS[a.key], now=a.hp>0?Math.ceil(a.hp/u.hp):0, l=Math.max(0,start[a.id]-now), r=Math.ceil(l/2);
+    lost+=l; back+=r; if(r>0){ a.hp=Math.min(start[a.id]*u.hp,Math.max(0,a.hp)+r*u.hp); a.max=Math.max(a.max||0,a.hp); } });
+  army=army.filter(a=>a.hp>0);
+  const exp=Math.min(400,Math.round(dmg/12)); heroExp+=exp; checkLevelUp();
+  bLog(reason==='kill'?'☠️ Босс повержен!':reason==='wiped'?'💀 Армия разбита, но удар нанесён.':reason==='retreat'?'🏳️ Попытка закончена.':'⏳ Время вышло — босс отступает в туман.');
+  track('boss',{key:bf.key,dmg,reason,lost,back,practice:bf.practice?1:0});
+  updateHud(); saveSoon(true);
+  const done=(extra)=>{ bossFight=null; curEncounter=null; showView('map'); renderMap();
+    openModal(`<h2>${BOSS_INFO[bf.key].emoji} Итог попытки</h2>
+      <div class="modalNote" style="color:var(--text);">Вы нанесли <b>${fmtNum(dmg)}</b> урона${bf.practice?' (тренировка, не засчитано)':''}.<br>
+      Павших: ${lost}${back?`, из них вернулись в строй: ${back}`:''}. Опыт: +${exp}.</div>${extra||''}
+      <button style="width:100%;margin-top:10px;" onclick="closeModal();openBoss()">👹 К боссу</button>
+      <button class="secondary" style="width:100%;margin-top:8px;" onclick="closeModal()">Закрыть</button>`); };
+  if(bf.practice){ setTimeout(()=>done(''),1300); return; }
+  (async()=>{
+    let extra='';
+    try{ const r=await apiPost('/boss/hit',{initData:tgInitData(),week:bf.week,dmg,pow:Math.max(1,bf.pow),v:GAME_VERSION});
+      if(r.data&&r.data.state) bossState=r.data.state;
+      if(r.status===200){ const st=r.data.state;
+        extra=r.data.killed_now?`<div class="modalNote" style="color:var(--good);margin-top:6px;">☠️ <b>Ваш удар добил босса!</b> Награды всем участникам — посылками, вам — с бонусом.</div>`
+          :st?`<div class="modalNote" style="margin-top:6px;">Осталось здоровья: <b>${fmtNum(Math.max(0,st.hp-st.dmg))}</b> из ${fmtNum(st.hp)}. Ваш вклад за неделю: ${fmtNum(st.me?st.me.dmg:dmg)}.</div>`:'';
+        if(r.data.killed_now) setTimeout(()=>checkInbox(false),2500); }
+      else if(r.data&&r.data.error==='already') extra='<div class="modalNote" style="margin-top:6px;">Сегодня попытка уже была засчитана — этот урон не учтён.</div>';
+      else if(r.data&&r.data.error==='killed') extra='<div class="modalNote" style="margin-top:6px;">Пока вы сражались, другие игроки добили босса. Награда придёт посылкой.</div>';
+      else extra='<div class="modalNote" style="margin-top:6px;">Сервер не принял результат.</div>';
+    }catch(e){ extra='<div class="modalNote" style="margin-top:6px;">Нет связи с сервером — урон не засчитан.</div>'; }
+    setTimeout(()=>done(extra),900);
+  })();
+}
+document.getElementById('bossBtn').onclick=()=>openBoss();
 /* ================= MENU / MODAL ================= */
 let modalLocked=false;
 function openModal(html,locked){
@@ -5454,7 +5576,7 @@ async function checkInbox(silent){
 }
 function rewardText(rw){
   const p=rw.payload||{}, what=[p.gold?`+${p.gold}💰`:'',p.item&&ITEMS[p.item]?`${ITEMS[p.item].emoji} ${ITEMS[p.item].name}`:''].filter(Boolean).join(', ');
-  const why={ref_invitee:'подарок за приход по приглашению друга',ref_inviter:'ваш приглашённый друг выиграл первый бой',gift:'подарок от разработчика',promo:'промокод',purchase:'покупка'}[rw.kind]||rw.kind;
+  const why={ref_invitee:'подарок за приход по приглашению друга',ref_inviter:'ваш приглашённый друг выиграл первый бой',boss:'мировой босс повержен — ваша доля добычи',gift:'подарок от разработчика',promo:'промокод',purchase:'покупка'}[rw.kind]||rw.kind;
   return `${what} — ${why}`;
 }
 function showInboxToast(){
